@@ -7,5 +7,6 @@
   "requirements": ["hik-sdk"],
   "iot_class": "local_push",
   "version": "1.0.0",
-  "config_flow": true
+  "config_flow": true,
+  "homeassistant": "2023.8.0"
 } 
