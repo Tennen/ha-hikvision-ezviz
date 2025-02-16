@@ -22,7 +22,7 @@ from .HCNetSDK import (
     NET_DVR_STREAMDATA,
 )
 
-from PlayCtrl import *
+from .PlayCtrl import *
 
 _LOGGER = logging.getLogger(__name__)
 
