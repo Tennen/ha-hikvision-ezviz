@@ -351,4 +351,44 @@ class HikvisionEnvizAPI:
         """Cleanup when object is destroyed."""
         if hasattr(self, '_connected') and self._connected:
             self._hik_sdk.NET_DVR_Logout(self._user_id)
-            self._hik_sdk.NET_DVR_Cleanup() 
+            self._hik_sdk.NET_DVR_Cleanup()
+
+    def test_connection(self) -> bool:
+        """Test connection to camera."""
+        try:
+            # Set SDK initialization configuration
+            self._set_sdk_init_cfg()
+            
+            # Initialize SDK
+            if not self._hik_sdk.NET_DVR_Init():
+                error_code = self._hik_sdk.NET_DVR_GetLastError()
+                _LOGGER.error("Failed to initialize SDK with error code: %s", error_code)
+                return False
+
+            # Prepare login info
+            login_info = NET_DVR_USER_LOGIN_INFO()
+            device_info = NET_DVR_DEVICEINFO_V40()
+            
+            # Convert string inputs to bytes for SDK
+            login_info.sDeviceAddress = self._host.encode()
+            login_info.wPort = self._port
+            login_info.sUserName = self._username.encode()
+            login_info.sPassword = self._password.encode()
+            
+            # Try to login
+            user_id = self._hik_sdk.NET_DVR_Login_V40(byref(login_info), byref(device_info))
+            
+            if user_id < 0:
+                error_code = self._hik_sdk.NET_DVR_GetLastError()
+                _LOGGER.error("Login failed with error code: %s", error_code)
+                return False
+            
+            # Cleanup test connection
+            self._hik_sdk.NET_DVR_Logout(user_id)
+            self._hik_sdk.NET_DVR_Cleanup()
+            
+            return True
+            
+        except Exception as ex:
+            _LOGGER.error("Error testing connection: %s", str(ex))
+            return False 
