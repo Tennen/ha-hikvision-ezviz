@@ -1,6 +1,7 @@
 """The Hikvision Enviz Camera integration."""
 from __future__ import annotations
 
+import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_USERNAME
 from homeassistant.core import HomeAssistant
@@ -8,17 +9,24 @@ from homeassistant.core import HomeAssistant
 from .const import DOMAIN
 from .hikvision_api import HikvisionEnvizAPI
 
+_LOGGER = logging.getLogger(__name__)
+
 PLATFORMS: list[str] = ["camera"]
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Set up the Hikvision Enviz component."""
+    hass.data.setdefault(DOMAIN, {})
+    return True
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Hikvision Enviz Camera from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     
     api = HikvisionEnvizAPI(
-        entry.data[CONF_HOST],
-        entry.data[CONF_PORT],
-        entry.data[CONF_USERNAME],
-        entry.data[CONF_PASSWORD],
+        host=entry.data[CONF_HOST],
+        port=entry.data[CONF_PORT],
+        username=entry.data[CONF_USERNAME],
+        password=entry.data[CONF_PASSWORD],
     )
 
     if not await api.connect():
