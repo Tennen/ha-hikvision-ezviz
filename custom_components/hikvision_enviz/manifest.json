@@ -4,7 +4,7 @@
   "documentation": "https://https://github.com/Tennen/ha-hikvision-ezviz",
   "dependencies": [],
   "codeowners": ["@Tennen"],
-  "requirements": ["hik-sdk"],
+  "requirements": [],
   "iot_class": "local_push",
   "version": "1.0.0",
   "config_flow": true,
