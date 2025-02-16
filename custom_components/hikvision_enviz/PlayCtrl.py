@@ -3,7 +3,7 @@
 import os
 from ctypes import *
 
-from HCNetSDK import sys_platform, system_type, C_DWORD
+from .HCNetSDK import sys_platform, system_type, C_DWORD
 
 if sys_platform == 'linux':
     load_library = cdll.LoadLibrary
