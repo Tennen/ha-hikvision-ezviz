@@ -17,8 +17,8 @@ else:
 
 playM4dllpath_dict = {'windows64': os.path.dirname(__file__) + '\\lib\\' + 'PlayCtrl.dll',
                       'windows32': os.path.dirname(__file__) + '\\lib\\' + 'PlayCtrl.dll',
-                      'linux64': os.path.dirname(__file__) + '/lib/libPlayCtrl.so',
-                      'linux32': os.path.dirname(__file__) + '/lib/libPlayCtrl.so'}
+                      'linux64': '/lib/libPlayCtrl.so',
+                      'linux32': '/lib/libPlayCtrl.so'}
 playM4dllpath = playM4dllpath_dict[system_type]
 
 

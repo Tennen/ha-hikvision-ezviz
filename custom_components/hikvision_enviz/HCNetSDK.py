@@ -31,8 +31,8 @@ else:
 
 netsdkdllpath_dict = {'windows64': os.path.dirname(__file__) + '\\lib\\' + 'HCNetSDK.dll',
                       'windows32': os.path.dirname(__file__) + '\\lib\\' + 'HCNetSDK.dll',
-                      'linux64': os.path.dirname(__file__) + '/lib/libhcnetsdk.so',
-                      'linux32': os.path.dirname(__file__) + '/lib/libhcnetsdk.so'}
+                      'linux64': '/lib/libhcnetsdk.so',
+                      'linux32': '/lib/libhcnetsdk.so'}
 netsdkdllpath = netsdkdllpath_dict[system_type]
 
 C_LLONG_DICT = {'windows64': c_longlong, 'windows32': c_long, 'linux32': c_long, 'linux64': c_long}
