@@ -3,9 +3,10 @@ import logging
 import os
 import time
 from typing import Optional, Callable
-from ctypes import byref, c_byte, c_long, memmove
+from ctypes import byref, c_byte, c_long, memmove, CFUNCTYPE, c_char_p, c_void_p, cast, POINTER
 import asyncio
 from datetime import datetime
+from aiohttp import web
 
 from .HCNetSDK import (
     NET_DVR_USER_LOGIN_INFO,
@@ -20,6 +21,12 @@ from .HCNetSDK import (
     create_string_buffer,
     NET_DVR_SYSHEAD,
     NET_DVR_STREAMDATA,
+    LPNET_DVR_PREVIEWINFO,
+    NET_DVR_RealPlay_V40,
+    NET_DVR_StopRealPlay,
+    NET_DVR_SetPlayDataCallBack,
+    NET_DVR_CaptureJPEGPicture_NEW,
+    NET_DVR_JPEGPARA,
 )
 
 from .PlayCtrl import *
@@ -46,6 +53,10 @@ class HikvisionEnvizAPI:
         self._play_ctrl_port = c_long(-1)
         self._stream_callback = None
         self._current_frame = None
+        self._play_handle = -1
+        self._stream_data = asyncio.Queue()
+        self._running = False
+        self._callback = None
         
         # Load SDK libraries
         try:
@@ -146,6 +157,7 @@ class HikvisionEnvizAPI:
                 _LOGGER.error("Failed to start preview with error code: %s", error_code)
                 return False
 
+            self._running = True
             return True
 
         except Exception as e:
@@ -440,3 +452,42 @@ class HikvisionEnvizAPI:
             ex.with_traceback()
             _LOGGER.error("Error testing connection: %s", str(ex))
             return False 
+
+    def real_data_callback(self, lRealHandle, dwDataType, pBuffer, dwBufSize, dwUser):
+        """回调函数，接收实时流数据."""
+        try:
+            if dwDataType == 1:  # NET_DVR_SYSHEAD
+                _LOGGER.debug("Received system header")
+                return
+            
+            if dwDataType == 2:  # NET_DVR_STREAMDATA
+                # 复制数据到缓冲区
+                data = bytes(cast(pBuffer, POINTER(c_byte * dwBufSize)).contents)
+                # 将数据放入队列
+                asyncio.get_event_loop().call_soon_threadsafe(
+                    self._stream_data.put_nowait, data
+                )
+        except Exception as e:
+            _LOGGER.error("Error in callback: %s", str(e))
+
+    async def _handle_mjpeg_stream(self, request):
+        """处理 MJPEG 流请求."""
+        response = web.StreamResponse()
+        response.content_type = 'multipart/x-mixed-replace; boundary=--frameboundary'
+        await response.prepare(request)
+
+        try:
+            while self._running:
+                frame = await self._stream_data.get()
+                if frame:
+                    await response.write(
+                        b'--frameboundary\r\n'
+                        b'Content-Type: image/jpeg\r\n'
+                        b'Content-Length: %d\r\n\r\n' % len(frame) +
+                        frame + b'\r\n'
+                    )
+        except Exception as e:
+            _LOGGER.error("Error in MJPEG stream handler: %s", str(e))
+        finally:
+            await response.write_eof()
+            return response 
