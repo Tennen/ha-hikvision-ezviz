@@ -32,9 +32,9 @@ class HikvisionEnvizAPI:
     def __init__(self, host: str, port: int, username: str, password: str):
         """Initialize the API."""
         # 设置库路径
-        os.environ['LD_LIBRARY_PATH'] = '/lib:/usr/glibc-compat/lib'
+        os.environ['LD_LIBRARY_PATH'] = '/lib:/usr/glibc-compat/lib:/lib/HCNetSDKCom/'
         if 'LD_LIBRARY_PATH' in os.environ:
-            os.environ['LD_LIBRARY_PATH'] = '/lib:/usr/glibc-compat/lib:' + os.environ['LD_LIBRARY_PATH']
+            os.environ['LD_LIBRARY_PATH'] = '/lib:/usr/glibc-compat/lib:/lib/HCNetSDKCom/:' + os.environ['LD_LIBRARY_PATH']
         
         self._host = host
         self._port = port
