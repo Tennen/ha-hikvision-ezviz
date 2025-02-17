@@ -69,8 +69,7 @@ class HikvisionEnvizCamera(Camera):
         self._attr_name = entry.title
         self._attr_unique_id = entry.entry_id
         self._attr_supported_features = (
-            CameraEntityFeature.STREAM |
-            CameraEntityFeature.ZOOM
+            CameraEntityFeature.STREAM
         )
         self._frame_interval = 1/30  # 30 FPS
         self._current_image = None
