@@ -6,7 +6,7 @@ CONF_PORT = "port"
 CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
 
-DEFAULT_PORT = 80
+DEFAULT_PORT = 8000
 DEFAULT_USERNAME = "admin"
 
 # Add more constants as needed for your specific implementation 
