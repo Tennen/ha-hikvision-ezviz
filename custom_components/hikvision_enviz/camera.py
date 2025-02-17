@@ -15,11 +15,30 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from PIL import Image
+from homeassistant.helpers import entity_platform
+import homeassistant.helpers.config_validation as cv
+import voluptuous as vol
 
 from .const import DOMAIN
 from .hikvision_api import HikvisionEnvizAPI
 
 _LOGGER = logging.getLogger(__name__)
+
+# 定义服务的名称
+SERVICE_PTZ = "ptz_control"
+
+# 定义服务的参数模式
+PTZ_SCHEMA = vol.Schema({
+    vol.Optional("pan", default=0): vol.All(
+        vol.Coerce(float), vol.Range(min=-1, max=1)
+    ),
+    vol.Optional("tilt", default=0): vol.All(
+        vol.Coerce(float), vol.Range(min=-1, max=1)
+    ),
+    vol.Optional("zoom", default=0): vol.All(
+        vol.Coerce(float), vol.Range(min=-1, max=1)
+    ),
+})
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -28,6 +47,15 @@ async def async_setup_entry(
 ) -> None:
     """Set up Hikvision Enviz Camera from config entry."""
     api = hass.data[DOMAIN][entry.entry_id]
+    
+    # 注册 PTZ 服务
+    platform = entity_platform.async_get_current_platform()
+    platform.async_register_entity_service(
+        SERVICE_PTZ,
+        PTZ_SCHEMA,
+        "ptz_control"
+    )
+    
     async_add_entities([HikvisionEnvizCamera(api, entry)], True)
 
 class HikvisionEnvizCamera(Camera):
@@ -42,7 +70,6 @@ class HikvisionEnvizCamera(Camera):
         self._attr_unique_id = entry.entry_id
         self._attr_supported_features = (
             CameraEntityFeature.STREAM |
-            CameraEntityFeature.PAN_TILT |
             CameraEntityFeature.ZOOM
         )
         self._frame_interval = 1/30  # 30 FPS
@@ -75,4 +102,10 @@ class HikvisionEnvizCamera(Camera):
     async def async_will_remove_from_hass(self) -> None:
         """Handle entity removal from hass."""
         await self._api.stop_stream()
-        await self._api.disconnect() 
+        await self._api.disconnect()
+
+    async def ptz_control(self, pan=0, tilt=0, zoom=0):
+        """Handle PTZ service call."""
+        await self.hass.async_add_executor_job(
+            self._api.ptz_control, pan, tilt, zoom
+        ) 
