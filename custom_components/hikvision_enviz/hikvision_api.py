@@ -410,9 +410,7 @@ class HikvisionEnvizAPI:
             login_info.wPort = self._port
             login_info.sUserName = self._username.encode()
             login_info.sPassword = self._password.encode()
-            login_info.byLoginMode = 1    # ISAPI模式
-            login_info.byHttps = 0        # 禁用HTTPS
-            login_info.byVerifyMode = 0   # 禁用验证
+            login_info.byLoginMode = 0
 
             struDeviceInfoV40 = NET_DVR_DEVICEINFO_V40()
             
