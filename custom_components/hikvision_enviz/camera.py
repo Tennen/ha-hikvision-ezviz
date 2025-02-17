@@ -10,7 +10,6 @@ from homeassistant.components.camera import (
     Camera,
     CameraEntityFeature,
     SUPPORT_STREAM,
-    SUPPORT_PTZ,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -41,7 +40,11 @@ class HikvisionEnvizCamera(Camera):
         self._entry = entry
         self._attr_name = entry.title
         self._attr_unique_id = entry.entry_id
-        self._attr_supported_features = SUPPORT_STREAM | SUPPORT_PTZ
+        self._attr_supported_features = (
+            CameraEntityFeature.STREAM |
+            CameraEntityFeature.PAN_TILT |
+            CameraEntityFeature.ZOOM
+        )
         self._frame_interval = 1/30  # 30 FPS
         self._current_image = None
 
