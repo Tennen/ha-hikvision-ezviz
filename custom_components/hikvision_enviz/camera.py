@@ -6,7 +6,12 @@ import asyncio
 from typing import Any
 import io
 
-from homeassistant.components.camera import Camera, CameraEntityFeature
+from homeassistant.components.camera import (
+    Camera,
+    CameraEntityFeature,
+    SUPPORT_STREAM,
+    SUPPORT_PTZ,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -33,9 +38,10 @@ class HikvisionEnvizCamera(Camera):
         """Initialize Hikvision Enviz Camera."""
         super().__init__()
         self._api = api
-        self._attr_name = f"Hikvision Enviz {entry.title}"
+        self._entry = entry
+        self._attr_name = entry.title
         self._attr_unique_id = entry.entry_id
-        self._attr_supported_features = CameraEntityFeature.PTZ
+        self._attr_supported_features = SUPPORT_STREAM | SUPPORT_PTZ
         self._frame_interval = 1/30  # 30 FPS
         self._current_image = None
 
