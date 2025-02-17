@@ -31,6 +31,11 @@ class HikvisionEnvizAPI:
 
     def __init__(self, host: str, port: int, username: str, password: str):
         """Initialize the API."""
+        # 禁用 X11 相关功能
+        os.environ['DISPLAY'] = ''
+        os.environ['SDL_VIDEODRIVER'] = 'dummy'
+        os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+        
         self._host = host
         self._port = port
         self._username = username
@@ -226,6 +231,14 @@ class HikvisionEnvizAPI:
                 create_string_buffer(str_path + b'/libssl.so.1.1')
             ):
                 _LOGGER.debug('SSL library path set successfully')
+        self._hik_sdk.NET_DVR_SetConnectTime(2000, 1)
+        self._hik_sdk.NET_DVR_SetReconnect(10000, True)
+        
+        # 禁用预览功能
+        self._hik_sdk.NET_DVR_SetSDKInitCfg(
+            NET_SDK_INIT_CFG_TYPE.NET_SDK_INIT_CFG_PREVIEW.value,
+            c_bool(False)
+        )
 
     async def connect(self) -> bool:
         """Connect to the camera."""
