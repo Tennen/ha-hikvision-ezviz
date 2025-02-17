@@ -410,9 +410,10 @@ class HikvisionEnvizAPI:
             login_info.wPort = self._port
             login_info.sUserName = self._username.encode()
             login_info.sPassword = self._password.encode()
+            struDeviceInfoV40 = NET_DVR_DEVICEINFO_V40()
             
             # Try to login
-            user_id = self._hik_sdk.NET_DVR_Login_V40(byref(login_info))
+            user_id = self._hik_sdk.NET_DVR_Login_V40(byref(login_info), byref(struDeviceInfoV40))
             
             if user_id < 0:
                 error_code = self._hik_sdk.NET_DVR_GetLastError()
