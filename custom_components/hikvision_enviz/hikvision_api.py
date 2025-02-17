@@ -378,6 +378,11 @@ class HikvisionEnvizAPI:
         except Exception as e:
             _LOGGER.error("Network check failed: %s", str(e))
             return False
+    
+    def GeneralSetting(self):
+        # 日志的等级（默认为0）：0-表示关闭日志，1-表示只输出ERROR错误日志，2-输出ERROR错误信息和DEBUG调试信息，3-输出ERROR错误信息、DEBUG调试信息和INFO普通信息等所有信息
+        # self.hikSDK.NET_DVR_SetLogToFile(3, b'./SdkLog_Python/', False)
+        self._hik_sdk.NET_DVR_SetLogToFile(3, bytes('./SdkLog_Python/', encoding="utf-8"), False)
 
     def test_connection(self) -> bool:
         """Test connection to camera."""
@@ -394,7 +399,7 @@ class HikvisionEnvizAPI:
             if not self.check_device_accessible():
                 _LOGGER.error("Device is not accessible")
                 return False
-
+            self.GeneralSetting()
             # Prepare login info
             login_info = NET_DVR_USER_LOGIN_INFO()
             
