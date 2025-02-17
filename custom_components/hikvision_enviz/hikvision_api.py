@@ -355,6 +355,23 @@ class HikvisionEnvizAPI:
             self._hik_sdk.NET_DVR_Logout(self._user_id)
             self._hik_sdk.NET_DVR_Cleanup()
 
+    def check_device_accessible(self):
+        """Check if the device is accessible."""
+        import socket
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(2)
+            result = sock.connect_ex((self._host, self._port))
+            sock.close()
+            if result == 0:
+                _LOGGER.debug("Device is accessible")
+                return True
+            _LOGGER.error("Device is not accessible")
+            return False
+        except Exception as e:
+            _LOGGER.error("Network check failed: %s", str(e))
+            return False
+
     def test_connection(self) -> bool:
         """Test connection to camera."""
         try:
@@ -367,15 +384,21 @@ class HikvisionEnvizAPI:
                 _LOGGER.error("Failed to initialize SDK with error code: %s", error_code)
                 return False
 
+            if not self.check_device_accessible():
+                _LOGGER.error("Device is not accessible")
+                return False
+
             # Prepare login info
             login_info = NET_DVR_USER_LOGIN_INFO()
             device_info = NET_DVR_DEVICEINFO_V40()
             
             # Convert string inputs to bytes for SDK
-            login_info.sDeviceAddress = self._host.encode()
+            login_info.sDeviceAddress = self._host
+            login_info.byLoginMode = 0
+            login_info.bUseAsynLogin = 0
             login_info.wPort = self._port
-            login_info.sUserName = self._username.encode()
-            login_info.sPassword = self._password.encode()
+            login_info.sUserName = self._username
+            login_info.sPassword = self._password
             
             # Try to login
             user_id = self._hik_sdk.NET_DVR_Login_V40(byref(login_info), byref(device_info))
