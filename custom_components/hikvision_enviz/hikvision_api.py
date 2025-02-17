@@ -233,12 +233,6 @@ class HikvisionEnvizAPI:
                 _LOGGER.debug('SSL library path set successfully')
         self._hik_sdk.NET_DVR_SetConnectTime(2000, 1)
         self._hik_sdk.NET_DVR_SetReconnect(10000, True)
-        
-        # 禁用预览功能
-        self._hik_sdk.NET_DVR_SetSDKInitCfg(
-            NET_SDK_INIT_CFG_TYPE.NET_SDK_INIT_CFG_PREVIEW.value,
-            c_bool(False)
-        )
 
     async def connect(self) -> bool:
         """Connect to the camera."""
@@ -418,7 +412,8 @@ class HikvisionEnvizAPI:
             
             if user_id < 0:
                 error_code = self._hik_sdk.NET_DVR_GetLastError()
-                _LOGGER.error("Login failed with error code: %s", error_code)
+                error_msg = self._hik_sdk.NET_DVR_GetErrorMsg(byref(c_long(error_code)))
+                _LOGGER.error("Login failed with error code: %d, message: %s", error_code, error_msg)
                 return False
             
             # Cleanup test connection
