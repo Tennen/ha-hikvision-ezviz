@@ -31,10 +31,11 @@ class HikvisionEnvizAPI:
 
     def __init__(self, host: str, port: int, username: str, password: str):
         """Initialize the API."""
-        # 禁用 X11 相关功能
-        os.environ['DISPLAY'] = ''
-        os.environ['SDL_VIDEODRIVER'] = 'dummy'
-        os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+        # 添加库搜索路径
+        if 'LD_LIBRARY_PATH' in os.environ:
+            os.environ['LD_LIBRARY_PATH'] = '/lib:' + os.environ['LD_LIBRARY_PATH']
+        else:
+            os.environ['LD_LIBRARY_PATH'] = '/lib'
         
         self._host = host
         self._port = port
