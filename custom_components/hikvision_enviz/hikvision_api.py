@@ -208,8 +208,7 @@ class HikvisionEnvizAPI:
                 _LOGGER.debug('SSL library path set successfully')
         else:
             # 先用字符串处理路径
-            base_path = os.path.dirname(__file__)
-            str_path = os.path.join(base_path, 'lib')
+            str_path = '/lib'
             # 然后转换为 bytes
             sdk_com_path = NET_DVR_LOCAL_SDK_PATH()
             sdk_com_path.sPath = str_path.encode()
