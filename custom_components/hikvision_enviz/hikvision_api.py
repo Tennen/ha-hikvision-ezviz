@@ -393,12 +393,12 @@ class HikvisionEnvizAPI:
             device_info = NET_DVR_DEVICEINFO_V40()
             
             # Convert string inputs to bytes for SDK
-            login_info.sDeviceAddress = self._host
+            login_info.sDeviceAddress = self._host.encode()
             login_info.byLoginMode = 0
             login_info.bUseAsynLogin = 0
             login_info.wPort = self._port
-            login_info.sUserName = self._username
-            login_info.sPassword = self._password
+            login_info.sUserName = self._username.encode()
+            login_info.sPassword = self._password.encode()
             
             # Try to login
             user_id = self._hik_sdk.NET_DVR_Login_V40(byref(login_info), byref(device_info))
