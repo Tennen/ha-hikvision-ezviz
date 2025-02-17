@@ -251,6 +251,7 @@ class HikvisionEnvizAPI:
                 error_code = self._hik_sdk.NET_DVR_GetLastError()
                 _LOGGER.error("Failed to initialize SDK with error code: %s", error_code)
                 return False
+            self.GeneralSetting()
 
             # Prepare login info
             login_info = NET_DVR_USER_LOGIN_INFO()
