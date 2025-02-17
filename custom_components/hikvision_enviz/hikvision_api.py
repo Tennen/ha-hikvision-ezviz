@@ -222,16 +222,18 @@ class HikvisionEnvizAPI:
                 _LOGGER.debug('SDK path set successfully')
 
             # Set crypto library path
+            crypto_path = os.path.join(str_path, 'libcrypto.so.1.1')
             if self._hik_sdk.NET_DVR_SetSDKInitCfg(
                 NET_SDK_INIT_CFG_TYPE.NET_SDK_INIT_CFG_LIBEAY_PATH.value,
-                create_string_buffer(str_path + b'/libcrypto.so.1.1')
+                create_string_buffer(crypto_path.encode())
             ):
                 _LOGGER.debug('Crypto library path set successfully')
 
             # Set SSL library path
+            ssl_path = os.path.join(str_path, 'libssl.so.1.1')
             if self._hik_sdk.NET_DVR_SetSDKInitCfg(
                 NET_SDK_INIT_CFG_TYPE.NET_SDK_INIT_CFG_SSLEAY_PATH.value,
-                create_string_buffer(str_path + b'/libssl.so.1.1')
+                create_string_buffer(ssl_path.encode())
             ):
                 _LOGGER.debug('SSL library path set successfully')
         self._hik_sdk.NET_DVR_SetConnectTime(2000, 1)
