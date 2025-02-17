@@ -207,7 +207,7 @@ class HikvisionEnvizAPI:
             ):
                 _LOGGER.debug('SSL library path set successfully')
         else:
-            base_path = os.getcwd().encode('utf-8')
+            base_path = os.path.dirname(__file__)
             str_path = base_path + b'/lib'
             sdk_com_path = NET_DVR_LOCAL_SDK_PATH()
             sdk_com_path.sPath = str_path
@@ -410,7 +410,9 @@ class HikvisionEnvizAPI:
             login_info.wPort = self._port
             login_info.sUserName = self._username.encode()
             login_info.sPassword = self._password.encode()
-            login_info.byLoginMode = 0
+            login_info.byLoginMode = 1    # ISAPI模式
+            login_info.byHttps = 0        # 禁用HTTPS
+            login_info.byVerifyMode = 0   # 禁用验证
 
             struDeviceInfoV40 = NET_DVR_DEVICEINFO_V40()
             
