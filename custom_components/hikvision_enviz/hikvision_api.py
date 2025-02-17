@@ -397,7 +397,6 @@ class HikvisionEnvizAPI:
 
             # Prepare login info
             login_info = NET_DVR_USER_LOGIN_INFO()
-            device_info = NET_DVR_DEVICEINFO_V40()
             
             # Convert string inputs to bytes for SDK
             login_info.sDeviceAddress = self._host.encode()
@@ -408,7 +407,7 @@ class HikvisionEnvizAPI:
             login_info.sPassword = self._password.encode()
             
             # Try to login
-            user_id = self._hik_sdk.NET_DVR_Login_V40(byref(login_info), byref(device_info))
+            user_id = self._hik_sdk.NET_DVR_Login_V40(byref(login_info))
             
             if user_id < 0:
                 error_code = self._hik_sdk.NET_DVR_GetLastError()
