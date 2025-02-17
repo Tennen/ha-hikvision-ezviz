@@ -434,5 +434,6 @@ class HikvisionEnvizAPI:
             return True
             
         except Exception as ex:
+            ex.with_traceback()
             _LOGGER.error("Error testing connection: %s", str(ex))
             return False 
