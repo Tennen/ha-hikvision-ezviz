@@ -273,6 +273,15 @@ class HikvisionEnvizAPI:
                 
             self._connected = True
             _LOGGER.info("Successfully connected to Hikvision camera")
+
+            # 登录成功后测试流
+            if self._user_id >= 0:
+                _LOGGER.info("Testing stream...")
+                if not self.test_stream():
+                    _LOGGER.error("Stream test failed")
+                    return False
+                _LOGGER.info("Stream test successful")
+            
             return True
             
         except Exception as ex:
@@ -507,3 +516,54 @@ class HikvisionEnvizAPI:
         except Exception as e:
             _LOGGER.error("Error getting camera image: %s", str(e))
             return None 
+
+    def test_stream(self):
+        """测试视频流."""
+        try:
+            # 创建预览参数结构体
+            preview_info = NET_DVR_PREVIEWINFO()
+            preview_info.hPlayWnd = 0      # 不使用窗口
+            preview_info.lChannel = 1      # 通道号
+            preview_info.dwStreamType = 0  # 主码流
+            preview_info.dwLinkMode = 0    # TCP
+            preview_info.bBlocked = 1      # 阻塞取流
+
+            # 设置回调函数
+            self._callback = REALDATACALLBACK(self.real_data_callback)
+            
+            # 启动预览
+            self._play_handle = self._hik_sdk.NET_DVR_RealPlay_V40(
+                self._user_id, byref(preview_info), self._callback, None
+            )
+
+            if self._play_handle < 0:
+                error_code = self._hik_sdk.NET_DVR_GetLastError()
+                _LOGGER.error(f"Start preview failed with error code: {error_code}")
+                return False
+
+            # 保存10帧数据用于测试
+            test_file = "/config/test_stream.dat"
+            frames_received = 0
+            
+            while frames_received < 10:
+                try:
+                    frame = self._stream_data.get(timeout=5)  # 5秒超时
+                    if frame:
+                        with open(test_file, "ab") as f:
+                            f.write(frame)
+                        frames_received += 1
+                        _LOGGER.info(f"Saved frame {frames_received}/10")
+                except queue.Empty:
+                    _LOGGER.error("Timeout waiting for frame")
+                    break
+
+            # 停止预览
+            self._hik_sdk.NET_DVR_StopRealPlay(self._play_handle)
+            self._play_handle = -1
+            
+            _LOGGER.info(f"Stream test completed, data saved to {test_file}")
+            return True
+
+        except Exception as e:
+            _LOGGER.error(f"Error testing stream: {str(e)}")
+            return False 
