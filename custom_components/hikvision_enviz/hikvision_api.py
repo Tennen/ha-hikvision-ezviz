@@ -120,49 +120,38 @@ class HikvisionEnvizAPI:
         except Exception as e:
             _LOGGER.error("Real data callback error: %s", str(e))
 
-    async def start_stream(self, callback: Callable[[bytes], None]) -> bool:
-        """Start camera stream with callback for frames."""
-        if not self._connected:
-            return False
+    def start_stream(self):
+        """启动视频流."""
+        if self._play_handle >= 0:
+            return self._handle_mjpeg_stream
 
         try:
-            # Get play port
-            if not self._play_sdk.PlayM4_GetPort(byref(self._play_ctrl_port)):
-                _LOGGER.error(
-                    "Failed to get play port, error: %s",
-                    self._play_sdk.PlayM4_GetLastError(self._play_ctrl_port)
-                )
-                return False
-
-            # Register callback
-            self._stream_callback = callback
-
-            # Start preview
+            # 创建预览参数结构体
             preview_info = NET_DVR_PREVIEWINFO()
-            preview_info.hPlayWnd = 0
-            preview_info.lChannel = 1  # Channel number
-            preview_info.dwStreamType = 0  # Main stream
-            preview_info.dwLinkMode = 0  # TCP
-            preview_info.bBlocked = 1  # Blocking stream
+            preview_info.hPlayWnd = 0      # 不使用窗口
+            preview_info.lChannel = 1      # 通道号
+            preview_info.dwStreamType = 0  # 主码流
+            preview_info.dwLinkMode = 0    # TCP
+            preview_info.bBlocked = 1      # 阻塞取流
 
-            self._real_play_handle = self._hik_sdk.NET_DVR_RealPlay_V40(
-                self._user_id,
-                byref(preview_info),
-                self._real_data_callback,
-                None
+            # 设置回调函数
+            self._callback = REALDATACALLBACK(self.real_data_callback)
+            
+            # 启动预览
+            self._play_handle = self._hik_sdk.NET_DVR_RealPlay_V40(
+                self._user_id, byref(preview_info), self._callback, None
             )
 
-            if self._real_play_handle < 0:
+            if self._play_handle < 0:
                 error_code = self._hik_sdk.NET_DVR_GetLastError()
-                _LOGGER.error("Failed to start preview with error code: %s", error_code)
-                return False
+                raise Exception(f"Start preview failed with error code: {error_code}")
 
             self._running = True
-            return True
+            return self._handle_mjpeg_stream
 
         except Exception as e:
             _LOGGER.error("Error starting stream: %s", str(e))
-            return False
+            return None
 
     async def stop_stream(self) -> None:
         """Stop camera stream."""
