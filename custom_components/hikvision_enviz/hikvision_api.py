@@ -454,14 +454,14 @@ class HikvisionEnvizAPI:
                 _LOGGER.info("Received system header")
                 # 保存系统头数据
                 data = bytes(cast(pBuffer, POINTER(c_byte * dwBufSize)).contents)
-                self._stream_data.put(data)
+                self._stream_data.put((1, data))
                 return
             
             if dwDataType == 2:  # NET_DVR_STREAMDATA
                 # 复制数据到缓冲区
                 data = bytes(cast(pBuffer, POINTER(c_byte * dwBufSize)).contents)
                 # 将数据放入队列
-                self._stream_data.put(data)
+                self._stream_data.put((2, data))
                 _LOGGER.debug(f"Received stream data: {dwBufSize} bytes")
         except Exception as e:
             _LOGGER.error(f"Error in callback: {str(e)}")
@@ -547,21 +547,30 @@ class HikvisionEnvizAPI:
 
             # 保存原始数据用于测试
             test_file = "/config/test_stream.h264"
-            header_received = False
+            sps_pps_received = False
             frames_received = 0
             
-            while frames_received < 100:  # 增加帧数以确保获取足够数据
-                try:
-                    frame = self._stream_data.get(timeout=5)  # 5秒超时
-                    if frame:
-                        with open(test_file, "ab") as f:
-                            # 写入原始数据
-                            f.write(frame)
-                        frames_received += 1
-                        _LOGGER.info(f"Saved frame {frames_received}/100")
-                except queue.Empty:
-                    _LOGGER.error("Timeout waiting for frame")
-                    break
+            with open(test_file, "wb") as f:
+                # H.264 开始码
+                f.write(b'\x00\x00\x00\x01')
+                
+                while frames_received < 100:  # 增加帧数以确保获取足够数据
+                    try:
+                        data_type, frame = self._stream_data.get(timeout=5)  # 5秒超时
+                        if frame:
+                            if data_type == 1:  # SPS/PPS
+                                if not sps_pps_received:
+                                    f.write(frame)
+                                    sps_pps_received = True
+                                    _LOGGER.info("Saved SPS/PPS")
+                            elif data_type == 2 and sps_pps_received:  # 视频帧
+                                f.write(b'\x00\x00\x00\x01')  # 帧分隔符
+                                f.write(frame)
+                                frames_received += 1
+                                _LOGGER.info(f"Saved frame {frames_received}/100")
+                    except queue.Empty:
+                        _LOGGER.error("Timeout waiting for frame")
+                        break
 
             # 停止预览
             self._hik_sdk.NET_DVR_StopRealPlay(self._play_handle)
