@@ -31,23 +31,23 @@ async def async_setup_entry(
     """Set up Hikvision camera from a config entry."""
     api = hass.data[DOMAIN][entry.entry_id]
     
-    # 注册 PTZ 服务
-    platform = entity_platform.async_get_current_platform()
-    platform.async_register_entity_service(
-        "ptz_control",
-        {
-            vol.Optional("pan", default=0): vol.All(
-                vol.Coerce(float), vol.Range(min=-1, max=1)
-            ),
-            vol.Optional("tilt", default=0): vol.All(
-                vol.Coerce(float), vol.Range(min=-1, max=1)
-            ),
-            vol.Optional("zoom", default=0): vol.All(
-                vol.Coerce(float), vol.Range(min=-1, max=1)
-            ),
-        },
-        "ptz_control"
-    )
+    # # 注册 PTZ 服务
+    # platform = entity_platform.async_get_current_platform()
+    # platform.async_register_entity_service(
+    #     "ptz_control",
+    #     {
+    #         vol.Optional("pan", default=0): vol.All(
+    #             vol.Coerce(float), vol.Range(min=-1, max=1)
+    #         ),
+    #         vol.Optional("tilt", default=0): vol.All(
+    #             vol.Coerce(float), vol.Range(min=-1, max=1)
+    #         ),
+    #         vol.Optional("zoom", default=0): vol.All(
+    #             vol.Coerce(float), vol.Range(min=-1, max=1)
+    #         ),
+    #     },
+    #     "ptz_control"
+    # )
     
     camera = HikvisionEnvizCamera(api, entry)
     async_add_entities([camera], True)
