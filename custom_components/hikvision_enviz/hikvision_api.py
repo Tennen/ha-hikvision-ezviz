@@ -451,16 +451,20 @@ class HikvisionEnvizAPI:
         """回调函数，接收实时流数据."""
         try:
             if dwDataType == 1:  # NET_DVR_SYSHEAD
-                _LOGGER.debug("Received system header")
+                _LOGGER.info("Received system header")
+                # 保存系统头数据
+                data = bytes(cast(pBuffer, POINTER(c_byte * dwBufSize)).contents)
+                self._stream_data.put(data)
                 return
             
             if dwDataType == 2:  # NET_DVR_STREAMDATA
                 # 复制数据到缓冲区
                 data = bytes(cast(pBuffer, POINTER(c_byte * dwBufSize)).contents)
-                # 使用线程安全的队列
+                # 将数据放入队列
                 self._stream_data.put(data)
+                _LOGGER.debug(f"Received stream data: {dwBufSize} bytes")
         except Exception as e:
-            _LOGGER.error("Error in callback: %s", str(e))
+            _LOGGER.error(f"Error in callback: {str(e)}")
 
     async def _handle_mjpeg_stream(self, request):
         """处理 MJPEG 流请求."""
@@ -541,18 +545,20 @@ class HikvisionEnvizAPI:
                 _LOGGER.error(f"Start preview failed with error code: {error_code}")
                 return False
 
-            # 保存10帧数据用于测试
-            test_file = "/config/test_stream.dat"
+            # 保存原始数据用于测试
+            test_file = "/config/test_stream.h264"
+            header_received = False
             frames_received = 0
             
-            while frames_received < 10:
+            while frames_received < 100:  # 增加帧数以确保获取足够数据
                 try:
                     frame = self._stream_data.get(timeout=5)  # 5秒超时
                     if frame:
                         with open(test_file, "ab") as f:
+                            # 写入原始数据
                             f.write(frame)
                         frames_received += 1
-                        _LOGGER.info(f"Saved frame {frames_received}/10")
+                        _LOGGER.info(f"Saved frame {frames_received}/100")
                 except queue.Empty:
                     _LOGGER.error("Timeout waiting for frame")
                     break
