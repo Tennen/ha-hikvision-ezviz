@@ -21,12 +21,6 @@ from .HCNetSDK import (
     create_string_buffer,
     NET_DVR_SYSHEAD,
     NET_DVR_STREAMDATA,
-    LPNET_DVR_PREVIEWINFO,
-    NET_DVR_RealPlay_V40,
-    NET_DVR_StopRealPlay,
-    NET_DVR_SetPlayDataCallBack,
-    NET_DVR_CaptureJPEGPicture_NEW,
-    NET_DVR_JPEGPARA,
 )
 
 from .PlayCtrl import *
