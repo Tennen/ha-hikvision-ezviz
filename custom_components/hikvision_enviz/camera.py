@@ -63,13 +63,12 @@ class HikvisionEnvizCamera(Camera):
         self._entry = entry
         self._attr_name = entry.title
         self._attr_unique_id = entry.entry_id
-        self._attr_supported_features = CameraEntityFeature.ON_OFF | CameraEntityFeature.STREAM
         self._stream_handler = None
 
     @property
     def supported_features(self) -> int:
         """Return supported features."""
-        return self._attr_supported_features
+        return CameraEntityFeature.STREAM
 
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
@@ -80,10 +79,15 @@ class HikvisionEnvizCamera(Camera):
     async def handle_async_mjpeg_stream(self, request):
         """Return an MJPEG stream."""
         if not self._stream_handler:
-            self._stream_handler = await self.hass.async_add_executor_job(
-                self._api.start_stream
-            )
-        return await self._stream_handler(request)
+            self._stream_handler = self._api.start_stream()
+        
+        if self._stream_handler:
+            return await self._stream_handler(request)
+        return None
+
+    async def async_stream_source(self) -> str | None:
+        """Return the source of the stream."""
+        return None  # 我们使用 MJPEG 流，不需要返回 RTSP URL
 
     async def async_turn_off(self):
         """Turn off camera."""
@@ -94,9 +98,7 @@ class HikvisionEnvizCamera(Camera):
     async def async_turn_on(self):
         """Turn on camera."""
         if not self._stream_handler:
-            self._stream_handler = await self.hass.async_add_executor_job(
-                self._api.start_stream
-            )
+            self._stream_handler = self._api.start_stream()
 
     async def ptz_control(self, pan=0, tilt=0, zoom=0):
         """Handle PTZ service call."""
