@@ -7,6 +7,7 @@ from ctypes import byref, c_byte, c_long, memmove, CFUNCTYPE, c_char_p, c_void_p
 import asyncio
 from datetime import datetime
 from aiohttp import web
+import queue
 
 from .HCNetSDK import (
     NET_DVR_USER_LOGIN_INFO,
@@ -48,9 +49,10 @@ class HikvisionEnvizAPI:
         self._stream_callback = None
         self._current_frame = None
         self._play_handle = -1
-        self._stream_data = asyncio.Queue()
+        self._stream_data = queue.Queue()
         self._running = False
         self._callback = None
+        self._loop = None
         
         # Load SDK libraries
         try:
@@ -446,10 +448,8 @@ class HikvisionEnvizAPI:
             if dwDataType == 2:  # NET_DVR_STREAMDATA
                 # 复制数据到缓冲区
                 data = bytes(cast(pBuffer, POINTER(c_byte * dwBufSize)).contents)
-                # 将数据放入队列
-                asyncio.get_event_loop().call_soon_threadsafe(
-                    self._stream_data.put_nowait, data
-                )
+                # 使用线程安全的队列
+                self._stream_data.put(data)
         except Exception as e:
             _LOGGER.error("Error in callback: %s", str(e))
 
@@ -457,20 +457,53 @@ class HikvisionEnvizAPI:
         """处理 MJPEG 流请求."""
         response = web.StreamResponse()
         response.content_type = 'multipart/x-mixed-replace; boundary=--frameboundary'
+        response.enable_chunked_encoding = True  # 启用分块编码
         await response.prepare(request)
 
         try:
             while self._running:
-                frame = await self._stream_data.get()
-                if frame:
-                    await response.write(
-                        b'--frameboundary\r\n'
-                        b'Content-Type: image/jpeg\r\n'
-                        b'Content-Length: %d\r\n\r\n' % len(frame) +
-                        frame + b'\r\n'
-                    )
+                try:
+                    # 非阻塞方式获取数据
+                    frame = self._stream_data.get_nowait()
+                    if frame:
+                        # 构建 MJPEG 帧
+                        mjpeg_frame = (
+                            b'--frameboundary\r\n'
+                            b'Content-Type: image/jpeg\r\n'
+                            b'Content-Length: %d\r\n\r\n' % len(frame)
+                        ) + frame + b'\r\n'
+                        
+                        await response.write(mjpeg_frame)
+                except queue.Empty:
+                    # 如果队列为空，等待一小段时间
+                    await asyncio.sleep(0.1)
+                    continue
+                except ConnectionResetError:
+                    break
         except Exception as e:
             _LOGGER.error("Error in MJPEG stream handler: %s", str(e))
         finally:
-            await response.write_eof()
-            return response 
+            self._running = False
+            if not response.prepared:
+                return web.Response(status=500)
+            return response
+
+    async def async_camera_image(self) -> bytes | None:
+        """获取摄像头图像."""
+        try:
+            # 等待获取一帧数据
+            frame = None
+            timeout = 5  # 5秒超时
+            start_time = time.time()
+            
+            while not frame and (time.time() - start_time) < timeout:
+                try:
+                    frame = self._stream_data.get_nowait()
+                except queue.Empty:
+                    await asyncio.sleep(0.1)
+                    continue
+            
+            return frame if frame else None
+        except Exception as e:
+            _LOGGER.error("Error getting camera image: %s", str(e))
+            return None 

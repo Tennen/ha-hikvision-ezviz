@@ -75,11 +75,7 @@ class HikvisionEnvizCamera(Camera):
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
         """Return a still image response from the camera."""
-        try:
-            return await self.hass.async_add_executor_job(self._api.get_snapshot)
-        except Exception as e:
-            _LOGGER.error("Error getting camera image: %s", str(e))
-            return None
+        return await self._api.async_camera_image()
 
     async def handle_async_mjpeg_stream(self, request):
         """Return an MJPEG stream."""
