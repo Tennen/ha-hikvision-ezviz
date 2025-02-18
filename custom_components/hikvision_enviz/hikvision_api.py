@@ -533,52 +533,71 @@ class HikvisionEnvizAPI:
             preview_info.bBlocked = 1      # 阻塞取流
 
             # 设置回调函数
-            self._callback = REALDATACALLBACK(self.real_data_callback)
+            self._callback = REALDATACALLBACK(self.RealDataCallBack_V30)
             
             # 启动预览
-            self._play_handle = self._hik_sdk.NET_DVR_RealPlay_V40(
+            self.lRealPlayHandle = self._hik_sdk.NET_DVR_RealPlay_V40(
                 self._user_id, byref(preview_info), self._callback, None
             )
 
-            if self._play_handle < 0:
+            if self.lRealPlayHandle < 0:
                 error_code = self._hik_sdk.NET_DVR_GetLastError()
                 _LOGGER.error(f"Start preview failed with error code: {error_code}")
                 return False
 
-            # 保存原始数据用于测试
-            test_file = "/config/test_stream.h264"
-            sps_pps_received = False
-            frames_received = 0
-            
-            with open(test_file, "wb") as f:
-                # H.264 开始码
-                f.write(b'\x00\x00\x00\x01')
-                
-                while frames_received < 100:  # 增加帧数以确保获取足够数据
-                    try:
-                        data_type, frame = self._stream_data.get(timeout=5)  # 5秒超时
-                        if frame:
-                            if data_type == 1:  # SPS/PPS
-                                if not sps_pps_received:
-                                    f.write(frame)
-                                    sps_pps_received = True
-                                    _LOGGER.info("Saved SPS/PPS")
-                            elif data_type == 2 and sps_pps_received:  # 视频帧
-                                f.write(b'\x00\x00\x00\x01')  # 帧分隔符
-                                f.write(frame)
-                                frames_received += 1
-                                _LOGGER.info(f"Saved frame {frames_received}/100")
-                    except queue.Empty:
-                        _LOGGER.error("Timeout waiting for frame")
-                        break
+            # 等待10秒钟收集数据
+            time.sleep(10)
 
             # 停止预览
-            self._hik_sdk.NET_DVR_StopRealPlay(self._play_handle)
-            self._play_handle = -1
+            self._hik_sdk.NET_DVR_StopRealPlay(self.lRealPlayHandle)
+            self.lRealPlayHandle = -1
             
-            _LOGGER.info(f"Stream test completed, data saved to {test_file}")
+            _LOGGER.info("Stream test completed")
             return True
 
         except Exception as e:
             _LOGGER.error(f"Error testing stream: {str(e)}")
-            return False 
+            return False
+
+    def RealDataCallBack_V30(self, lPlayHandle, dwDataType, pBuffer, dwBufSize, pUser):
+        """码流回调函数."""
+        try:
+            if dwDataType == NET_DVR_SYSHEAD:
+                # 系统头数据
+                from datetime import datetime
+                current_time = datetime.now()
+                timestamp_str = current_time.strftime('%Y%m%d_%H%M%S')
+                self.preview_file = f'/config/test_stream_{timestamp_str}.mp4'
+                _LOGGER.info(f"Created new stream file: {self.preview_file}")
+                
+            elif dwDataType == NET_DVR_STREAMDATA:
+                # 码流数据
+                self.writeFile(self.preview_file, pBuffer, dwBufSize)
+                
+            else:
+                _LOGGER.debug(f'其他数据,长度: {dwBufSize}')
+                
+        except Exception as e:
+            _LOGGER.error(f"Error in callback: {str(e)}")
+
+    def writeFile(self, filePath, pBuffer, dwBufSize):
+        """将视频流保存到本地."""
+        try:
+            # 使用memmove函数将指针数据读到数组中
+            data_array = (c_byte * dwBufSize)()
+            memmove(data_array, pBuffer, dwBufSize)
+
+            # 确保目录存在
+            os.makedirs(os.path.dirname(filePath), exist_ok=True)
+
+            # 判断文件是否存在
+            if not os.path.exists(filePath):
+                # 如果不存在，创建文件
+                open(filePath, "wb").close()
+
+            # 追加写入数据
+            with open(filePath, 'ab') as f:
+                f.write(data_array)
+                
+        except Exception as e:
+            _LOGGER.error(f"Error writing file: {str(e)}") 
