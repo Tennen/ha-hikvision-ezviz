@@ -34,9 +34,7 @@ class HikvisionEnvizAPI:
     def __init__(self, host: str, port: int, username: str, password: str):
         """Initialize the API."""
         # 设置库路径
-        os.environ['LD_LIBRARY_PATH'] = '/lib:/usr/glibc-compat/lib:/lib/HCNetSDKCom/'
-        if 'LD_LIBRARY_PATH' in os.environ:
-            os.environ['LD_LIBRARY_PATH'] = '/lib:/usr/glibc-compat/lib:/lib/HCNetSDKCom/:' + os.environ['LD_LIBRARY_PATH']
+        os.environ['LD_LIBRARY_PATH'] = '/lib:/lib/HCNetSDKCom/:/usr/lib:/usr/lib/HCNetSDKCom/'
         
         self._host = host
         self._port = port
@@ -181,61 +179,34 @@ class HikvisionEnvizAPI:
     def _set_sdk_init_cfg(self) -> None:
         """Set SDK initialization configuration."""
         # Set HCNetSDK component and SSL library paths
-        if sys_platform == 'windows':
-            base_path = os.getcwd().encode('gbk')
-            str_path = base_path + b'\\lib'
-            sdk_com_path = NET_DVR_LOCAL_SDK_PATH()
-            sdk_com_path.sPath = str_path
+        # 先用字符串处理路径
+        str_path = '/lib/'
+        # 然后转换为 bytes
+        sdk_com_path = NET_DVR_LOCAL_SDK_PATH()
+        sdk_com_path.sPath = str_path.encode()
 
-            # Set SDK path
-            if self._hik_sdk.NET_DVR_SetSDKInitCfg(
-                NET_SDK_INIT_CFG_TYPE.NET_SDK_INIT_CFG_SDK_PATH.value,
-                byref(sdk_com_path)
-            ):
-                _LOGGER.debug('SDK path set successfully')
+        # Set SDK path
+        if self._hik_sdk.NET_DVR_SetSDKInitCfg(
+            NET_SDK_INIT_CFG_TYPE.NET_SDK_INIT_CFG_SDK_PATH.value,
+            byref(sdk_com_path)
+        ):
+            _LOGGER.debug('SDK path set successfully')
 
-            # Set crypto library path
-            if self._hik_sdk.NET_DVR_SetSDKInitCfg(
-                NET_SDK_INIT_CFG_TYPE.NET_SDK_INIT_CFG_LIBEAY_PATH.value,
-                create_string_buffer(str_path + b'\\libcrypto-1_1-x64.dll')
-            ):
-                _LOGGER.debug('Crypto library path set successfully')
+        # Set crypto library path
+        crypto_path = os.path.join(str_path, 'libcrypto.so.1.1')
+        if self._hik_sdk.NET_DVR_SetSDKInitCfg(
+            NET_SDK_INIT_CFG_TYPE.NET_SDK_INIT_CFG_LIBEAY_PATH.value,
+            create_string_buffer(crypto_path.encode())
+        ):
+            _LOGGER.debug('Crypto library path set successfully')
 
-            # Set SSL library path
-            if self._hik_sdk.NET_DVR_SetSDKInitCfg(
-                NET_SDK_INIT_CFG_TYPE.NET_SDK_INIT_CFG_SSLEAY_PATH.value,
-                create_string_buffer(str_path + b'\\libssl-1_1-x64.dll')
-            ):
-                _LOGGER.debug('SSL library path set successfully')
-        else:
-            # 先用字符串处理路径
-            str_path = '/lib/'
-            # 然后转换为 bytes
-            sdk_com_path = NET_DVR_LOCAL_SDK_PATH()
-            sdk_com_path.sPath = str_path.encode()
-
-            # Set SDK path
-            if self._hik_sdk.NET_DVR_SetSDKInitCfg(
-                NET_SDK_INIT_CFG_TYPE.NET_SDK_INIT_CFG_SDK_PATH.value,
-                byref(sdk_com_path)
-            ):
-                _LOGGER.debug('SDK path set successfully')
-
-            # Set crypto library path
-            crypto_path = os.path.join(str_path, 'libcrypto.so.1.1')
-            if self._hik_sdk.NET_DVR_SetSDKInitCfg(
-                NET_SDK_INIT_CFG_TYPE.NET_SDK_INIT_CFG_LIBEAY_PATH.value,
-                create_string_buffer(crypto_path.encode())
-            ):
-                _LOGGER.debug('Crypto library path set successfully')
-
-            # Set SSL library path
-            ssl_path = os.path.join(str_path, 'libssl.so.1.1')
-            if self._hik_sdk.NET_DVR_SetSDKInitCfg(
-                NET_SDK_INIT_CFG_TYPE.NET_SDK_INIT_CFG_SSLEAY_PATH.value,
-                create_string_buffer(ssl_path.encode())
-            ):
-                _LOGGER.debug('SSL library path set successfully')
+        # Set SSL library path
+        ssl_path = os.path.join(str_path, 'libssl.so.1.1')
+        if self._hik_sdk.NET_DVR_SetSDKInitCfg(
+            NET_SDK_INIT_CFG_TYPE.NET_SDK_INIT_CFG_SSLEAY_PATH.value,
+            create_string_buffer(ssl_path.encode())
+        ):
+            _LOGGER.debug('SSL library path set successfully')
         self._hik_sdk.NET_DVR_SetConnectTime(2000, 1)
         self._hik_sdk.NET_DVR_SetReconnect(10000, True)
 
