@@ -21,7 +21,7 @@ def install_system_dependencies():
     try:
         # 检查并安装必要的系统依赖
         os.system("apk update")
-        os.system("apk add libc6-compat build-base")
+        os.system("apk add libc6-compat build-base opencv")
         return True
     except Exception as e:
         _LOGGER.error("Failed to install system dependencies: %s", str(e))
