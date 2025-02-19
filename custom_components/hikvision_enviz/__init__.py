@@ -16,9 +16,25 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [Platform.CAMERA]
 
+def install_system_dependencies():
+    """Install required system dependencies."""
+    try:
+        # 检查并安装必要的系统依赖
+        os.system("apk update")
+        os.system("apk add --no-cache libc6-compat build-base")
+        return True
+    except Exception as e:
+        _LOGGER.error("Failed to install system dependencies: %s", str(e))
+        return False
+
 def copy_lib_files(hass: HomeAssistant):
     """Copy library files to system lib directory."""
     try:
+        # 首先安装系统依赖
+        if not install_system_dependencies():
+            _LOGGER.error("Failed to install system dependencies")
+            return False
+            
         # 获取插件lib目录路径
         component_path = Path(__file__).parent
         lib_path = component_path / "lib"
