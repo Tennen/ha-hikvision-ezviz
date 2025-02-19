@@ -5,7 +5,7 @@ import logging
 import asyncio
 from typing import Any
 
-from homeassistant.components.camera import Camera
+from homeassistant.components.camera import Camera, DynamicStreamSettings
 from homeassistant.components.stream import (
     CONF_USE_WALLCLOCK_AS_TIMESTAMPS,
     create_stream,
@@ -80,6 +80,7 @@ class HikvisionEnvizCamera(Camera):
                     self.hass,
                     source,
                     self.stream_options,
+                    DynamicStreamSettings()
                 )
             return await self._stream.async_get_image()
         except Exception as err:
@@ -94,6 +95,7 @@ class HikvisionEnvizCamera(Camera):
                 self.hass,
                 source,
                 self.stream_options,
+                DynamicStreamSettings()
             )
         return await self._stream.async_handle_web_rtc_offer(offer_sdp)
 
