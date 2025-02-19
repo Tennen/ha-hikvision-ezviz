@@ -53,10 +53,10 @@ class HikvisionEnvizCamera(Camera):
         def stream_callback(data_type, data):
             """Callback to receive stream data."""
             if data_type == 2:  # NET_DVR_STREAMDATA
-                self._stream_queue.put_nowait((data_type, data))
+                self._stream_queue.put_nowait(data)
 
         await self.hass.async_add_executor_job(
-            self._api.start_preview, stream_callback
+            self._api.start_stream, stream_callback
         )
         
         # 返回一个可以提供流数据的生成器
@@ -105,4 +105,4 @@ class HikvisionEnvizCamera(Camera):
         if self._stream:
             await self._stream.stop()
             self._stream = None
-        await self.hass.async_add_executor_job(self._api.stop_preview) 
+        await self.hass.async_add_executor_job(self._api.stop_stream) 

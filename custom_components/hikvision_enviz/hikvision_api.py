@@ -277,7 +277,7 @@ class HikvisionEnvizAPI:
                 return False
                 
             self._connected = True
-            _LOGGER.info("Successfully connected to Hikvision camera")
+            _LOGGER.info("Successfully connected to Hikvision camera, user_id: %s", self._user_id)
 
             # 登录成功后测试流
             if self._user_id >= 0:
@@ -468,7 +468,7 @@ class HikvisionEnvizAPI:
         except Exception as e:
             _LOGGER.error(f"Error in callback: {str(e)}")
 
-    def test_stream(self):
+    async def test_stream(self) -> bool:
         """测试视频流."""
         try:
             # 创建预览参数结构体
@@ -492,8 +492,8 @@ class HikvisionEnvizAPI:
                 _LOGGER.error(f"Start preview failed with error code: {error_code}")
                 return False
 
-            # 等待10秒钟收集数据
-            time.sleep(10)
+            # 使用异步等待替代 sleep
+            await asyncio.sleep(10)
 
             # 停止预览
             self._hik_sdk.NET_DVR_StopRealPlay(self.lRealPlayHandle)
