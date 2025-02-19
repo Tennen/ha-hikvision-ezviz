@@ -116,12 +116,18 @@ class HikvisionEnvizAPI:
         except Exception as e:
             _LOGGER.error("Real data callback error: %s", str(e))
 
-    def start_stream(self):
-        """启动视频流."""
-        if self._play_handle >= 0:
-            return self._handle_mjpeg_stream
-
+    def start_stream(self, callback=None):
+        """启动视频流.
+        
+        Args:
+            callback: 可选的回调函数，接收 (data_type, data) 参数
+                     data_type: 1 为系统头数据，2 为码流数据
+                     data: bytes 类型的数据
+        """
         try:
+            # 设置回调函数
+            self._stream_callback = callback
+            
             # 创建预览参数结构体
             preview_info = NET_DVR_PREVIEWINFO()
             preview_info.hPlayWnd = 0      # 不使用窗口
@@ -140,34 +146,33 @@ class HikvisionEnvizAPI:
 
             if self._play_handle < 0:
                 error_code = self._hik_sdk.NET_DVR_GetLastError()
-                raise Exception(f"Start preview failed with error code: {error_code}")
+                _LOGGER.error(f"Start preview failed with error code: {error_code}")
+                return None
 
-            self._running = True
-            return self._handle_mjpeg_stream
+            return self._play_handle
 
         except Exception as e:
-            _LOGGER.error("Error starting stream: %s", str(e))
+            _LOGGER.error(f"Error starting stream: {str(e)}")
             return None
 
     async def stop_stream(self) -> None:
-        """Stop camera stream."""
+        """停止视频流."""
         try:
-            if self._real_play_handle >= 0:
-                self._hik_sdk.NET_DVR_StopRealPlay(self._real_play_handle)
-                self._real_play_handle = -1
+            if self._play_handle >= 0:
+                self._hik_sdk.NET_DVR_StopRealPlay(self._play_handle)
+                self._play_handle = -1
 
-            # Stop decoding and release resources
-            if self._play_ctrl_port.value > -1:
+            # 停止解码，释放播放库资源
+            if self._play_ctrl_port.value >= 0:
                 self._play_sdk.PlayM4_Stop(self._play_ctrl_port)
                 self._play_sdk.PlayM4_CloseStream(self._play_ctrl_port)
                 self._play_sdk.PlayM4_FreePort(self._play_ctrl_port)
                 self._play_ctrl_port = c_long(-1)
 
             self._stream_callback = None
-            self._current_frame = None
 
         except Exception as e:
-            _LOGGER.error("Error stopping stream: %s", str(e))
+            _LOGGER.error(f"Error stopping stream: {str(e)}")
 
     async def get_current_frame(self) -> Optional[bytes]:
         """Get the current frame."""
@@ -299,13 +304,6 @@ class HikvisionEnvizAPI:
             self._hik_sdk.NET_DVR_Cleanup()
             self._connected = False
             self._user_id = -1
-
-    async def get_stream_url(self) -> Optional[str]:
-        """Get the camera stream URL."""
-        if not self._connected:
-            return None
-        
-        return f"rtsp://{self._username}:{self._password}@{self._host}:{self._port}/Streaming/Channels/101"
 
     async def get_snapshot(self) -> Optional[bytes]:
         """Get camera snapshot."""
@@ -450,76 +448,25 @@ class HikvisionEnvizAPI:
     def real_data_callback(self, lRealHandle, dwDataType, pBuffer, dwBufSize, dwUser):
         """回调函数，接收实时流数据."""
         try:
-            if dwDataType == 1:  # NET_DVR_SYSHEAD
+            if dwDataType == NET_DVR_SYSHEAD:  # 系统头数据
                 _LOGGER.info("Received system header")
                 # 保存系统头数据
-                data = bytes(cast(pBuffer, POINTER(c_byte * dwBufSize)).contents)
-                self._stream_data.put((1, data))
-                return
-            
-            if dwDataType == 2:  # NET_DVR_STREAMDATA
-                # 复制数据到缓冲区
-                data = bytes(cast(pBuffer, POINTER(c_byte * dwBufSize)).contents)
-                # 将数据放入队列
-                self._stream_data.put((2, data))
-                _LOGGER.debug(f"Received stream data: {dwBufSize} bytes")
+                if self._stream_callback:
+                    data_array = (c_byte * dwBufSize)()
+                    memmove(data_array, pBuffer, dwBufSize)
+                    header_data = bytes(data_array)
+                    asyncio.create_task(self._stream_callback(1, header_data))
+                
+            elif dwDataType == NET_DVR_STREAMDATA:  # 码流数据
+                # 直接传递码流数据
+                if self._stream_callback:
+                    data_array = (c_byte * dwBufSize)()
+                    memmove(data_array, pBuffer, dwBufSize)
+                    stream_data = bytes(data_array)
+                    asyncio.create_task(self._stream_callback(2, stream_data))
+                
         except Exception as e:
             _LOGGER.error(f"Error in callback: {str(e)}")
-
-    async def _handle_mjpeg_stream(self, request):
-        """处理 MJPEG 流请求."""
-        response = web.StreamResponse()
-        response.content_type = 'multipart/x-mixed-replace; boundary=--frameboundary'
-        response.enable_chunked_encoding = True  # 启用分块编码
-        await response.prepare(request)
-
-        try:
-            while self._running:
-                try:
-                    # 非阻塞方式获取数据
-                    frame = self._stream_data.get_nowait()
-                    if frame:
-                        # 构建 MJPEG 帧
-                        mjpeg_frame = (
-                            b'--frameboundary\r\n'
-                            b'Content-Type: image/jpeg\r\n'
-                            b'Content-Length: %d\r\n\r\n' % len(frame)
-                        ) + frame + b'\r\n'
-                        
-                        await response.write(mjpeg_frame)
-                except queue.Empty:
-                    # 如果队列为空，等待一小段时间
-                    await asyncio.sleep(0.1)
-                    continue
-                except ConnectionResetError:
-                    break
-        except Exception as e:
-            _LOGGER.error("Error in MJPEG stream handler: %s", str(e))
-        finally:
-            self._running = False
-            if not response.prepared:
-                return web.Response(status=500)
-            return response
-
-    async def async_camera_image(self) -> bytes | None:
-        """获取摄像头图像."""
-        try:
-            # 等待获取一帧数据
-            frame = None
-            timeout = 5  # 5秒超时
-            start_time = time.time()
-            
-            while not frame and (time.time() - start_time) < timeout:
-                try:
-                    frame = self._stream_data.get_nowait()
-                except queue.Empty:
-                    await asyncio.sleep(0.1)
-                    continue
-            
-            return frame if frame else None
-        except Exception as e:
-            _LOGGER.error("Error getting camera image: %s", str(e))
-            return None 
 
     def test_stream(self):
         """测试视频流."""

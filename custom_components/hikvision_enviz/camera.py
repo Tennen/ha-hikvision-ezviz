@@ -4,21 +4,18 @@ from __future__ import annotations
 import logging
 import asyncio
 from typing import Any
-import io
 
-from homeassistant.components.camera import (
-    Camera,
-    CameraEntityFeature,
+from homeassistant.components.camera import Camera
+from homeassistant.components.stream import (
+    CONF_USE_WALLCLOCK_AS_TIMESTAMPS,
+    StreamType,
+    create_stream,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from PIL import Image
-from homeassistant.helpers import entity_platform
-import homeassistant.helpers.config_validation as cv
-import voluptuous as vol
 
-from . import DOMAIN
+from .const import DOMAIN
 from .hikvision_api import HikvisionEnvizAPI
 
 _LOGGER = logging.getLogger(__name__)
@@ -27,84 +24,85 @@ async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
-) -> bool:
-    """Set up Hikvision camera from a config entry."""
-    api = hass.data[DOMAIN][entry.entry_id]
-    
-    # # 注册 PTZ 服务
-    # platform = entity_platform.async_get_current_platform()
-    # platform.async_register_entity_service(
-    #     "ptz_control",
-    #     {
-    #         vol.Optional("pan", default=0): vol.All(
-    #             vol.Coerce(float), vol.Range(min=-1, max=1)
-    #         ),
-    #         vol.Optional("tilt", default=0): vol.All(
-    #             vol.Coerce(float), vol.Range(min=-1, max=1)
-    #         ),
-    #         vol.Optional("zoom", default=0): vol.All(
-    #             vol.Coerce(float), vol.Range(min=-1, max=1)
-    #         ),
-    #     },
-    #     "ptz_control"
-    # )
-    
-    camera = HikvisionEnvizCamera(api, entry)
-    async_add_entities([camera], True)
-    return True
+) -> None:
+    """Set up Hikvision Enviz Camera from a config entry."""
+    api: HikvisionEnvizAPI = hass.data[DOMAIN][entry.entry_id]
+    async_add_entities([HikvisionEnvizCamera(hass, api, entry)], True)
 
 class HikvisionEnvizCamera(Camera):
-    """Representation of a Hikvision Enviz Camera."""
+    """An implementation of a Hikvision Enviz camera."""
 
-    def __init__(self, api: HikvisionEnvizAPI, entry: ConfigEntry) -> None:
-        """Initialize Hikvision Enviz Camera."""
+    def __init__(self, hass: HomeAssistant, api: HikvisionEnvizAPI, entry: ConfigEntry) -> None:
+        """Initialize Hikvision Enviz camera."""
         super().__init__()
+        self.hass = hass
         self._api = api
-        self._entry = entry
-        self._attr_name = entry.title
-        self._attr_unique_id = entry.entry_id
-        self._stream_handler = None
+        self._attr_unique_id = f"{entry.entry_id}_camera"
+        self._attr_name = f"Camera {api._host}"
+        self._stream = None
+        self._stream_queue = asyncio.Queue()
+        
+        # Stream options
+        self.stream_options = {
+            CONF_USE_WALLCLOCK_AS_TIMESTAMPS: True,
+        }
 
-    @property
-    def supported_features(self) -> int:
-        """Return supported features."""
-        return CameraEntityFeature.STREAM
+    async def _get_stream_source(self):
+        """Get stream source from Hikvision API."""
+        # 启动预览并获取流数据
+        def stream_callback(data_type, data):
+            """Callback to receive stream data."""
+            if data_type == 2:  # NET_DVR_STREAMDATA
+                self._stream_queue.put_nowait((data_type, data))
+
+        await self.hass.async_add_executor_job(
+            self._api.start_preview, stream_callback
+        )
+        
+        # 返回一个可以提供流数据的生成器
+        async def stream_generator():
+            while True:
+                try:
+                    data = await self._stream_queue.get()
+                    yield data
+                except asyncio.CancelledError:
+                    break
+
+        return stream_generator()
 
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
         """Return a still image response from the camera."""
-        return await self._api.async_camera_image()
-
-    async def handle_async_mjpeg_stream(self, request):
-        """Return an MJPEG stream."""
-        if not self._stream_handler:
-            self._stream_handler = self._api.start_stream()
-        
-        if self._stream_handler:
-            return await self._stream_handler(request)
-        return None
-
-    async def async_stream_source(self) -> str | None:
-        """Return the source of the stream."""
-        return None  # 我们使用 MJPEG 流，不需要返回 RTSP URL
-
-    async def async_turn_off(self):
-        """Turn off camera."""
-        if self._stream_handler:
-            await self.hass.async_add_executor_job(self._api.stop_stream)
-            self._stream_handler = None
-
-    async def async_turn_on(self):
-        """Turn on camera."""
-        if not self._stream_handler:
-            self._stream_handler = self._api.start_stream()
-
-    async def ptz_control(self, pan=0, tilt=0, zoom=0):
-        """Handle PTZ service call."""
         try:
-            await self.hass.async_add_executor_job(
-                self._api.ptz_control, pan, tilt, zoom
+            if self._stream is None:
+                source = await self._get_stream_source()
+                self._stream = create_stream(
+                    self.hass,
+                    source,
+                    self.stream_options,
+                    StreamType.HLS,
+                )
+            return await self._stream.async_get_image()
+        except Exception as err:
+            _LOGGER.error("Error getting camera image: %s", err)
+            return None
+
+    async def async_handle_web_rtc_offer(self, offer_sdp: str) -> str | None:
+        """Handle the WebRTC offer and return an answer."""
+        if not self._stream:
+            source = await self._get_stream_source()
+            self._stream = create_stream(
+                self.hass,
+                source,
+                self.stream_options,
+                StreamType.HLS,
             )
-        except Exception as e:
-            _LOGGER.error("Error controlling PTZ: %s", str(e)) 
+        return await self._stream.async_handle_web_rtc_offer(offer_sdp)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Cleanup when entity is removed."""
+        if self._stream:
+            await self._stream.stop()
+            self._stream = None
+        await self.hass.async_add_executor_job(self._api.stop_preview) 

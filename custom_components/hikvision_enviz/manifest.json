@@ -2,7 +2,7 @@
   "domain": "hikvision_enviz",
   "name": "Hikvision Enviz Camera",
   "documentation": "https://https://github.com/Tennen/ha-hikvision-ezviz",
-  "dependencies": [],
+  "dependencies": ["stream"],
   "codeowners": ["@Tennen"],
   "requirements": [],
   "iot_class": "local_push",
