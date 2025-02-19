@@ -1,4 +1,4 @@
-"""Support for Hikvision Enviz Cameras."""
+"""Support for Hikvision Enviz cameras."""
 from __future__ import annotations
 
 import logging
@@ -8,7 +8,6 @@ from typing import Any
 from homeassistant.components.camera import Camera
 from homeassistant.components.stream import (
     CONF_USE_WALLCLOCK_AS_TIMESTAMPS,
-    StreamType,
     create_stream,
 )
 from homeassistant.config_entries import ConfigEntry
@@ -81,7 +80,6 @@ class HikvisionEnvizCamera(Camera):
                     self.hass,
                     source,
                     self.stream_options,
-                    StreamType.HLS,
                 )
             return await self._stream.async_get_image()
         except Exception as err:
@@ -96,7 +94,6 @@ class HikvisionEnvizCamera(Camera):
                 self.hass,
                 source,
                 self.stream_options,
-                StreamType.HLS,
             )
         return await self._stream.async_handle_web_rtc_offer(offer_sdp)
 
