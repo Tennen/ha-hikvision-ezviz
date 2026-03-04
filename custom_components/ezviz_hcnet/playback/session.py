@@ -11,7 +11,7 @@ import subprocess
 import threading
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from homeassistant.core import HomeAssistant
@@ -58,7 +58,7 @@ class PlaybackSession:
         self.handle: int | None = None
         self.status = "INIT"
         self.last_error: str | None = None
-        self.created_at = datetime.now(tz=UTC)
+        self.created_at = datetime.now(tz=timezone.utc)
         self.last_access = self.created_at
 
         self._callback: PLAY_DATA_CALLBACK | None = None
@@ -252,7 +252,7 @@ class PlaybackSession:
         )
 
     def _touch(self) -> None:
-        self.last_access = datetime.now(tz=UTC)
+        self.last_access = datetime.now(tz=timezone.utc)
 
 
 class PlaybackSessionManager:
@@ -306,7 +306,7 @@ class PlaybackSessionManager:
             session = self._session
             if session is None:
                 return
-            if session.is_stale(datetime.now(tz=UTC)):
+            if session.is_stale(datetime.now(tz=timezone.utc)):
                 _LOGGER.debug("Closing stale playback session %s", session.session_id)
                 self._session = None
                 await self.client.async_run_in_executor(session.close)
