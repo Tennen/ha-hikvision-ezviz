@@ -8,6 +8,7 @@ class EzvizHcnetPanel extends HTMLElement {
     this._statusTimer = null;
     this._liveCard = null;
     this._liveCardEntityId = null;
+    this._liveCardBuildTask = null;
     this._dragSeekValue = null;
     this._isPaused = false;
     this._state = {
@@ -48,6 +49,7 @@ class EzvizHcnetPanel extends HTMLElement {
       this._isPaused = false;
       this._liveCard = null;
       this._liveCardEntityId = null;
+      this._liveCardBuildTask = null;
       this._refreshStatus();
     }
     this._render();
@@ -61,6 +63,7 @@ class EzvizHcnetPanel extends HTMLElement {
     this._destroyHls();
     this._liveCard = null;
     this._liveCardEntityId = null;
+    this._liveCardBuildTask = null;
   }
 
   get _entryId() {
@@ -92,6 +95,21 @@ class EzvizHcnetPanel extends HTMLElement {
     return null;
   }
 
+  async _buildLiveCard(entityId) {
+    if (!window.loadCardHelpers) {
+      throw new Error("loadCardHelpers is not available");
+    }
+    const helpers = await window.loadCardHelpers();
+    const card = await helpers.createCardElement({
+      type: "picture-entity",
+      entity: entityId,
+      camera_view: "live",
+      show_name: false,
+      show_state: false,
+    });
+    return card;
+  }
+
   _mountLiveCard() {
     const container = this.shadowRoot?.getElementById("liveCardContainer");
     if (!container) return;
@@ -100,33 +118,51 @@ class EzvizHcnetPanel extends HTMLElement {
     if (!entityId || !this._hass) {
       this._liveCard = null;
       this._liveCardEntityId = null;
+      this._liveCardBuildTask = null;
       container.innerHTML = '<div style="padding:14px;" class="muted">未找到对应 camera 实体，无法显示实时画面</div>';
       return;
     }
 
-    if (!this._liveCard || this._liveCardEntityId !== entityId) {
-      try {
-        const card = document.createElement("hui-picture-entity-card");
-        card.setConfig({
-          type: "picture-entity",
-          entity: entityId,
-          camera_view: "live",
-          show_name: false,
-          show_state: false,
-        });
-        this._liveCard = card;
-        this._liveCardEntityId = entityId;
-      } catch (err) {
-        this._liveCard = null;
-        this._liveCardEntityId = null;
-        container.innerHTML = `<div style="padding:14px;" class="error">加载实时卡片失败: ${String(err)}</div>`;
-        return;
-      }
+    if (this._liveCard && this._liveCardEntityId === entityId) {
+      container.innerHTML = "";
+      container.appendChild(this._liveCard);
+      this._liveCard.hass = this._hass;
+      return;
     }
 
-    container.innerHTML = "";
-    container.appendChild(this._liveCard);
-    this._liveCard.hass = this._hass;
+    if (this._liveCardBuildTask && this._liveCardEntityId === entityId) {
+      return;
+    }
+
+    this._liveCard = null;
+    this._liveCardEntityId = entityId;
+    container.innerHTML = '<div style="padding:14px;" class="muted">正在加载实时视频...</div>';
+
+    this._liveCardBuildTask = (async () => {
+      try {
+        const card = await this._buildLiveCard(entityId);
+        if (this._liveCardEntityId !== entityId) {
+          return;
+        }
+        this._liveCard = card;
+        const latestContainer = this.shadowRoot?.getElementById("liveCardContainer");
+        if (!latestContainer) return;
+        latestContainer.innerHTML = "";
+        latestContainer.appendChild(card);
+        card.hass = this._hass;
+      } catch (err) {
+        if (this._liveCardEntityId !== entityId) return;
+        this._liveCard = null;
+        const latestContainer = this.shadowRoot?.getElementById("liveCardContainer");
+        if (latestContainer) {
+          latestContainer.innerHTML = `<div style="padding:14px;" class="error">加载实时卡片失败: ${String(err)}</div>`;
+        }
+      } finally {
+        if (this._liveCardEntityId === entityId) {
+          this._liveCardBuildTask = null;
+        }
+      }
+    })();
   }
 
   async _refreshStatus() {

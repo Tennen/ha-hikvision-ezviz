@@ -13,6 +13,8 @@ NET_DVR_LOGIN_PASSWD_MAX_LEN = 64
 SERIALNO_LEN = 48
 NAME_LEN = 32
 STREAM_ID_LEN = 32
+ACS_CARD_NO_LEN = 32
+NET_DVR_FILE_NAME_LEN = 100
 
 
 class NET_DVR_TIME(C.Structure):
@@ -149,6 +151,39 @@ class NET_DVR_VOD_PARA(C.Structure):
     ]
 
 
+class NET_DVR_FILECOND_V40(C.Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("dwSize", C.c_uint32),
+        ("lChannel", C.c_int32),
+        ("byFindType", C.c_ubyte),
+        ("byQuickSearch", C.c_ubyte),
+        ("byStreamType", C.c_ubyte),
+        ("byFileType", C.c_ubyte),
+        ("struStartTime", NET_DVR_TIME),
+        ("struStopTime", NET_DVR_TIME),
+        ("sCardNumber", C.c_ubyte * ACS_CARD_NO_LEN),
+        ("byRes", C.c_ubyte * 256),
+    ]
+
+
+class NET_DVR_FINDDATA_V40(C.Structure):
+    _pack_ = 1
+    _fields_ = [
+        ("dwSize", C.c_uint32),
+        ("struStartTime", NET_DVR_TIME),
+        ("struStopTime", NET_DVR_TIME),
+        ("dwFileSize", C.c_uint32),
+        ("sFileName", C.c_ubyte * NET_DVR_FILE_NAME_LEN),
+        ("dwFileType", C.c_uint32),
+        ("byLocked", C.c_ubyte),
+        ("byUseCardNo", C.c_ubyte),
+        ("byRes1", C.c_ubyte * 2),
+        ("sCardNumber", C.c_ubyte * ACS_CARD_NO_LEN),
+        ("byRes", C.c_ubyte * 256),
+    ]
+
+
 PLAY_DATA_CALLBACK = C.CFUNCTYPE(
     None,
     C.c_int32,
@@ -179,6 +214,16 @@ def to_sdk_time(value: datetime) -> NET_DVR_TIME:
     t.dwMinute = value.minute
     t.dwSecond = value.second
     return t
+
+
+def from_sdk_time(value: NET_DVR_TIME) -> datetime:
+    year = int(value.dwYear) or 1970
+    month = min(max(int(value.dwMonth), 1), 12)
+    day = min(max(int(value.dwDay), 1), 31)
+    hour = min(max(int(value.dwHour), 0), 23)
+    minute = min(max(int(value.dwMinute), 0), 59)
+    second = min(max(int(value.dwSecond), 0), 59)
+    return datetime(year, month, day, hour, minute, second)
 
 
 @dataclass(slots=True)

@@ -6,9 +6,10 @@ import asyncio
 import ctypes as C
 import logging
 import threading
+import time as pytime
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, timedelta
 from functools import partial
 from pathlib import Path
 
@@ -17,6 +18,10 @@ from .const import (
     DEFAULT_PTZ_STEP_MS,
     DEFAULT_RTSP_PATH,
     DEFAULT_RTSP_PORT,
+    NET_DVR_FILE_NOFIND,
+    NET_DVR_FILE_SUCCESS,
+    NET_DVR_ISFINDING,
+    NET_DVR_NOMOREFILE,
     NET_DVR_PLAYGETPOS,
     NET_DVR_PLAYPAUSE,
     NET_DVR_PLAYRESTART,
@@ -27,10 +32,13 @@ from .const import (
 from .ctypes_defs import (
     LoginResult,
     NET_DVR_DEVICEINFO_V40,
+    NET_DVR_FILECOND_V40,
+    NET_DVR_FINDDATA_V40,
     NET_DVR_STREAM_INFO,
     NET_DVR_USER_LOGIN_INFO,
     NET_DVR_VOD_PARA,
     PLAY_DATA_CALLBACK,
+    from_sdk_time,
     fill_bytes,
     to_sdk_time,
 )
@@ -315,58 +323,72 @@ class HcNetSdkClient:
             self.env.sdk.NET_DVR_StopPlayBack(handle)
 
     def list_recordings_for_date(self, day: date, slot_minutes: int = 60) -> list[dict]:
-        if slot_minutes <= 0:
-            raise ValueError("slot_minutes must be > 0")
+        del slot_minutes  # Kept for API compatibility; SDK search returns native file segments.
 
-        slot = timedelta(minutes=slot_minutes)
-        day_start = datetime.combine(day, time.min)
-        day_end = day_start + timedelta(days=1)
+        day_start = datetime(day.year, day.month, day.day, 0, 0, 0)
+        day_end = day_start + timedelta(days=1) - timedelta(seconds=1)
 
-        intervals: list[tuple[datetime, datetime]] = []
-        cursor = day_start
-        while cursor < day_end:
-            window_end = min(cursor + slot, day_end)
-            if self._has_recording_interval(cursor, window_end):
-                intervals.append((cursor, window_end))
-            cursor = window_end
+        cond = NET_DVR_FILECOND_V40()
+        cond.dwSize = C.sizeof(NET_DVR_FILECOND_V40)
+        cond.lChannel = int(self.config.channel)
+        cond.byFindType = 0
+        cond.byQuickSearch = 1
+        cond.byStreamType = 0xFF
+        cond.byFileType = 0xFF
+        cond.struStartTime = to_sdk_time(day_start)
+        cond.struStopTime = to_sdk_time(day_end)
 
-        if not intervals:
-            return []
+        with self._lock:
+            find_handle = int(self.env.sdk.NET_DVR_FindFile_V40(self.user_id, C.byref(cond)))
+        if find_handle < 0:
+            err = self.env.get_last_error()
+            raise SdkCallError("NET_DVR_FindFile_V40 failed", error_code=err)
 
-        merged: list[tuple[datetime, datetime]] = []
-        for start, end in intervals:
-            if not merged:
-                merged.append((start, end))
-                continue
-            prev_start, prev_end = merged[-1]
-            if start <= prev_end:
-                merged[-1] = (prev_start, max(prev_end, end))
-            else:
-                merged.append((start, end))
-
-        return [
-            {
-                "id": f"{item_start.isoformat()}_{item_end.isoformat()}",
-                "start": item_start.isoformat(),
-                "end": item_end.isoformat(),
-                "duration_seconds": int((item_end - item_start).total_seconds()),
-            }
-            for item_start, item_end in merged
-        ]
-
-    def _has_recording_interval(self, start: datetime, end: datetime) -> bool:
-        handle: int | None = None
+        records: list[dict] = []
         try:
-            handle = self.playback_open(start, end)
-            return handle >= 0
-        except SdkCallError:
-            return False
+            while True:
+                data = NET_DVR_FINDDATA_V40()
+                data.dwSize = C.sizeof(NET_DVR_FINDDATA_V40)
+                with self._lock:
+                    ret = int(self.env.sdk.NET_DVR_FindNextFile_V40(find_handle, C.byref(data)))
+
+                if ret == NET_DVR_FILE_SUCCESS:
+                    start = from_sdk_time(data.struStartTime)
+                    end = from_sdk_time(data.struStopTime)
+                    if end <= start:
+                        continue
+
+                    name_bytes = bytes(data.sFileName)
+                    file_name = name_bytes.split(b"\x00", 1)[0].decode("utf-8", errors="ignore").strip()
+                    records.append(
+                        {
+                            "id": f"{start.isoformat()}_{end.isoformat()}_{len(records)}",
+                            "start": start.isoformat(),
+                            "end": end.isoformat(),
+                            "duration_seconds": int((end - start).total_seconds()),
+                            "file_name": file_name,
+                            "file_size": int(data.dwFileSize),
+                            "file_type": int(data.dwFileType),
+                            "locked": bool(data.byLocked),
+                        }
+                    )
+                    continue
+
+                if ret in (NET_DVR_NOMOREFILE, NET_DVR_FILE_NOFIND):
+                    break
+
+                if ret == NET_DVR_ISFINDING:
+                    pytime.sleep(0.05)
+                    continue
+
+                err = self.env.get_last_error()
+                raise SdkCallError("NET_DVR_FindNextFile_V40 failed", error_code=err)
         finally:
-            if handle is not None:
-                try:
-                    self.playback_close(handle)
-                except Exception:
-                    pass
+            with self._lock:
+                self.env.sdk.NET_DVR_FindClose_V30(find_handle)
+
+        records.sort(key=lambda item: item["start"])
+        return records
 
     def _login_blocking(self, host: str, port: int, username: str, password: str) -> LoginResult:
         login = NET_DVR_USER_LOGIN_INFO()

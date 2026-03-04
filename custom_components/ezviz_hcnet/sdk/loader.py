@@ -114,11 +114,6 @@ class HcNetSdkLoader:
             "libz.so",
             "libhpr.so",
             "libHCCore.so",
-            # libPlayCtrl.so depends on libSuperRender.so and libAudioRender.so
-            # with RPATH="./", so preload dependencies first.
-            "libSuperRender.so",
-            "libAudioRender.so",
-            "libPlayCtrl.so",
             "libhcnetsdk.so",
         ]
         for name in ordered:
@@ -126,7 +121,10 @@ class HcNetSdkLoader:
 
         com_dir = self._lib_dir / "HCNetSDKCom"
         if com_dir.exists():
+            skip = {"libHCDisplay.so", "libAudioIntercom.so"}
             for so in sorted(com_dir.glob("*.so")):
+                if so.name in skip:
+                    continue
                 self._load_shared(so)
 
     def _configure_signatures(self, sdk: C.CDLL) -> None:

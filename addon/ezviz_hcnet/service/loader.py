@@ -15,6 +15,8 @@ from .const import (
 )
 from .ctypes_defs import (
     NET_DVR_DEVICEINFO_V40,
+    NET_DVR_FINDDATA_V40,
+    NET_DVR_FILECOND_V40,
     NET_DVR_LOCAL_SDK_PATH,
     NET_DVR_USER_LOGIN_INFO,
     NET_DVR_VOD_PARA,
@@ -120,11 +122,6 @@ class HcNetSdkLoader:
             "libz.so",
             "libhpr.so",
             "libHCCore.so",
-            # libPlayCtrl.so depends on libSuperRender.so and libAudioRender.so
-            # with RPATH="./", so preload dependencies first.
-            "libSuperRender.so",
-            "libAudioRender.so",
-            "libPlayCtrl.so",
             "libhcnetsdk.so",
         ]
         for name in ordered:
@@ -132,7 +129,10 @@ class HcNetSdkLoader:
 
         com_dir = self._lib_dir / "HCNetSDKCom"
         if com_dir.exists():
+            skip = {"libHCDisplay.so", "libAudioIntercom.so"}
             for so in sorted(com_dir.glob("*.so")):
+                if so.name in skip:
+                    continue
                 self._load_shared(so)
 
     def _configure_signatures(self, sdk: C.CDLL) -> None:
@@ -175,6 +175,16 @@ class HcNetSdkLoader:
 
         sdk.NET_DVR_StopPlayBack.argtypes = [C.c_int]
         sdk.NET_DVR_StopPlayBack.restype = C.c_int
+
+        # Recording search
+        sdk.NET_DVR_FindFile_V40.argtypes = [C.c_int, C.POINTER(NET_DVR_FILECOND_V40)]
+        sdk.NET_DVR_FindFile_V40.restype = C.c_int
+
+        sdk.NET_DVR_FindNextFile_V40.argtypes = [C.c_int, C.POINTER(NET_DVR_FINDDATA_V40)]
+        sdk.NET_DVR_FindNextFile_V40.restype = C.c_int
+
+        sdk.NET_DVR_FindClose_V30.argtypes = [C.c_int]
+        sdk.NET_DVR_FindClose_V30.restype = C.c_int
 
     def _configure_sdk_init_paths(self, sdk: C.CDLL) -> None:
         crypto = C.create_string_buffer(str(self._lib_dir / "libcrypto.so.1.1").encode("utf-8"))

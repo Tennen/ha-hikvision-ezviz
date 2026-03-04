@@ -163,7 +163,7 @@ class AddonEntryClient:
             },
         )
 
-    async def async_list_recordings(self, day: str, slot_minutes: int = 15) -> dict[str, Any]:
+    async def async_list_recordings(self, day: str, slot_minutes: int = 60) -> dict[str, Any]:
         day_q = quote(day.strip())
         return await self._api.request_json(
             "get",
