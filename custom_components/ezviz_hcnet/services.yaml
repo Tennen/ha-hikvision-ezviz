@@ -1,0 +1,126 @@
+ptz_move:
+  name: PTZ Move
+  description: Start PTZ movement and stop after duration.
+  fields:
+    entry_id:
+      required: true
+      selector:
+        text:
+    direction:
+      required: true
+      selector:
+        select:
+          options:
+            - up
+            - down
+            - left
+            - right
+            - up_left
+            - up_right
+            - down_left
+            - down_right
+            - zoom_in
+            - zoom_out
+            - focus_near
+            - focus_far
+    speed:
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 7
+    duration_ms:
+      required: false
+      selector:
+        number:
+          min: 50
+          max: 10000
+
+ptz_stop:
+  name: PTZ Stop
+  description: Send stop command to PTZ direction.
+  fields:
+    entry_id:
+      required: true
+      selector:
+        text:
+    direction:
+      required: true
+      selector:
+        select:
+          options:
+            - up
+            - down
+            - left
+            - right
+            - up_left
+            - up_right
+            - down_left
+            - down_right
+            - zoom_in
+            - zoom_out
+            - focus_near
+            - focus_far
+    speed:
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 7
+
+playback_open:
+  name: Open Playback Session
+  description: Open an SDK playback session and create temporary HLS stream.
+  fields:
+    entry_id:
+      required: true
+      selector:
+        text:
+    start:
+      required: true
+      selector:
+        text:
+    end:
+      required: true
+      selector:
+        text:
+
+playback_control:
+  name: Playback Control
+  description: Control active playback session.
+  fields:
+    entry_id:
+      required: true
+      selector:
+        text:
+    session_id:
+      required: true
+      selector:
+        text:
+    action:
+      required: true
+      selector:
+        select:
+          options:
+            - play
+            - pause
+            - seek
+    seek_percent:
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 100
+
+playback_close:
+  name: Close Playback Session
+  description: Stop and close playback session.
+  fields:
+    entry_id:
+      required: true
+      selector:
+        text:
+    session_id:
+      required: true
+      selector:
+        text:

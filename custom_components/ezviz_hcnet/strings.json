@@ -1,0 +1,32 @@
+{
+  "title": "EZVIZ HCNet SDK",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configure EZVIZ HCNet device",
+        "description": "Set up a local HCNetSDK camera/NVR connection. Last SDK error: {sdk_error}",
+        "data": {
+          "name": "Name",
+          "host": "Device IP",
+          "port": "SDK port",
+          "username": "Username",
+          "password": "Password",
+          "channel": "Channel",
+          "rtsp_port": "RTSP port",
+          "rtsp_path": "RTSP path template",
+          "sdk_lib_dir_override": "SDK library directory override",
+          "ptz_default_speed": "Default PTZ speed",
+          "ptz_step_ms": "PTZ step duration (ms)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to device",
+      "sdk_load_failed": "Cannot load SDK libraries",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "Device channel is already configured"
+    }
+  }
+}

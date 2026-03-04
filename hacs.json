@@ -1,7 +1,0 @@
-{
-    "name": "Hikvision Enviz Camera",
-    "domains": ["camera"],
-    "homeassistant": "2023.8.0",
-    "iot_class": "local_push",
-    "render_readme": true
-} 
