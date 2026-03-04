@@ -17,6 +17,7 @@ CONF_CHANNEL = "channel"
 CONF_RTSP_PORT = "rtsp_port"
 CONF_RTSP_PATH = "rtsp_path"
 CONF_SDK_LIB_DIR_OVERRIDE = "sdk_lib_dir_override"
+CONF_ADDON_BASE_URL = "addon_base_url"
 CONF_PTZ_DEFAULT_SPEED = "ptz_default_speed"
 CONF_PTZ_STEP_MS = "ptz_step_ms"
 
@@ -24,6 +25,7 @@ DEFAULT_PORT = 8000
 DEFAULT_CHANNEL = 1
 DEFAULT_RTSP_PORT = 554
 DEFAULT_RTSP_PATH = "/Streaming/Channels/{channel}01"
+DEFAULT_ADDON_BASE_URL = "http://127.0.0.1:8099"
 DEFAULT_PTZ_SPEED = 4
 DEFAULT_PTZ_STEP_MS = 400
 

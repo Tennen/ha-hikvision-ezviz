@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -14,13 +13,13 @@ from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_USERNA
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers.event import async_track_time_interval
 
 try:  # pragma: no cover - compatibility with older HA
     from homeassistant.core import SupportsResponse
 except ImportError:  # pragma: no cover
     SupportsResponse = None
 
+from .backend_client import AddonApiError, AddonEntryClient
 from .const import (
     ATTR_ACTION,
     ATTR_DIRECTION,
@@ -31,12 +30,14 @@ from .const import (
     ATTR_SESSION_ID,
     ATTR_SPEED,
     ATTR_START,
+    CONF_ADDON_BASE_URL,
     CONF_CHANNEL,
     CONF_PTZ_DEFAULT_SPEED,
     CONF_PTZ_STEP_MS,
     CONF_RTSP_PATH,
     CONF_RTSP_PORT,
     CONF_SDK_LIB_DIR_OVERRIDE,
+    DEFAULT_ADDON_BASE_URL,
     DEFAULT_CHANNEL,
     DEFAULT_PTZ_SPEED,
     DEFAULT_PTZ_STEP_MS,
@@ -46,7 +47,6 @@ from .const import (
     PLAYBACK_ACTION_PAUSE,
     PLAYBACK_ACTION_PLAY,
     PLAYBACK_ACTION_SEEK,
-    PLAYBACK_SESSION_CLEANUP_INTERVAL,
     PLATFORMS,
     PTZ_DIRECTION_TO_CMD,
     SERVICE_PLAYBACK_CLOSE,
@@ -56,18 +56,13 @@ from .const import (
     SERVICE_PTZ_STOP,
 )
 from .http_views import async_register_http_views
+from .models import DeviceConfig
 from .panel import async_register_panel_for_entry, async_unregister_panel_for_entry
-from .playback.session import PlaybackSessionManager
-from .sdk.client import DeviceConfig, HcNetSdkClient, HcNetSdkEnvironment, SdkCallError
-from .sdk.loader import SdkLoadError
-
-_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
 class EntryRuntime:
-    client: HcNetSdkClient
-    playback: PlaybackSessionManager
+    client: AddonEntryClient
 
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -85,6 +80,8 @@ def _entry_config(entry: ConfigEntry) -> DeviceConfig:
         rtsp_path=data.get(CONF_RTSP_PATH, DEFAULT_RTSP_PATH),
         ptz_default_speed=int(data.get(CONF_PTZ_DEFAULT_SPEED, DEFAULT_PTZ_SPEED)),
         ptz_step_ms=int(data.get(CONF_PTZ_STEP_MS, DEFAULT_PTZ_STEP_MS)),
+        sdk_lib_dir_override=(data.get(CONF_SDK_LIB_DIR_OVERRIDE) or "").strip() or None,
+        addon_base_url=(data.get(CONF_ADDON_BASE_URL) or DEFAULT_ADDON_BASE_URL).strip(),
     )
 
 
@@ -103,10 +100,13 @@ def _parse_datetime(value: str) -> datetime:
     return dt
 
 
+def _hls_proxy_url(entry_id: str, session_id: str) -> str:
+    return f"/api/{DOMAIN}/{entry_id}/playback/{session_id}/index.m3u8"
+
+
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN].setdefault("entries", {})
-    hass.data[DOMAIN].setdefault("env", None)
     hass.data[DOMAIN].setdefault("services_registered", False)
 
     await async_register_http_views(hass)
@@ -115,44 +115,19 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
         _register_services(hass)
         hass.data[DOMAIN]["services_registered"] = True
 
-    if "cleanup_unsub" not in hass.data[DOMAIN]:
-        async def _cleanup_listener(now: datetime) -> None:
-            del now
-            for runtime in list(hass.data.get(DOMAIN, {}).get("entries", {}).values()):
-                try:
-                    await runtime.playback.async_cleanup_if_stale()
-                except Exception:  # pragma: no cover
-                    _LOGGER.exception("Failed to cleanup stale playback session")
-
-        hass.data[DOMAIN]["cleanup_unsub"] = async_track_time_interval(
-            hass,
-            _cleanup_listener,
-            PLAYBACK_SESSION_CLEANUP_INTERVAL,
-        )
-
     return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    override = (entry.options.get(CONF_SDK_LIB_DIR_OVERRIDE) or entry.data.get(CONF_SDK_LIB_DIR_OVERRIDE) or "").strip() or None
-
-    env: HcNetSdkEnvironment | None = hass.data[DOMAIN].get("env")
-    if env is None:
-        env = HcNetSdkEnvironment(override)
-        hass.data[DOMAIN]["env"] = env
-    elif override:
-        _LOGGER.warning("sdk_lib_dir_override is ignored for additional entries because SDK environment is already initialized")
-
     config = _entry_config(entry)
-    client = HcNetSdkClient(hass, env, config)
+    client = AddonEntryClient(hass, entry.entry_id, config)
 
     try:
         await client.async_connect()
-    except (SdkLoadError, SdkCallError) as err:
-        raise ConfigEntryNotReady(f"SDK init/login failed: {err}") from err
+    except AddonApiError as err:
+        raise ConfigEntryNotReady(f"Add-on backend init/login failed: {err}") from err
 
-    runtime = EntryRuntime(client=client, playback=PlaybackSessionManager(hass, client, entry.entry_id))
-    hass.data[DOMAIN]["entries"][entry.entry_id] = runtime
+    hass.data[DOMAIN]["entries"][entry.entry_id] = EntryRuntime(client=client)
 
     await async_register_panel_for_entry(hass, entry)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -164,11 +139,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     runtime = hass.data[DOMAIN]["entries"].pop(entry.entry_id, None)
     if runtime is not None:
-        await runtime.playback.async_close()
-        await runtime.client.async_close()
-
-    if not hass.data[DOMAIN]["entries"]:
-        hass.data[DOMAIN]["env"] = None
+        try:
+            await runtime.client.async_close()
+        except AddonApiError:
+            # Add-on may already be down while unloading entry.
+            pass
 
     await async_unregister_panel_for_entry(hass, entry)
     return unload_ok
@@ -242,24 +217,26 @@ def _register_services(hass: HomeAssistant) -> None:
         if end <= start:
             raise HomeAssistantError("end must be later than start")
 
-        session = await runtime.playback.async_open(start, end)
-        hls_url = f"/api/{DOMAIN}/{call.data[ATTR_ENTRY_ID]}/playback/{session.session_id}/index.m3u8"
-        info = session.info(hls_url)
+        payload = await runtime.client.async_playback_open(start, end)
+        session_id = str(payload.get("session_id", "")).strip()
+        if not session_id:
+            raise HomeAssistantError("playback_open did not return session_id")
+
         return {
-            "session_id": info.session_id,
-            "hls_url": info.hls_url,
-            "status": info.status,
+            "session_id": session_id,
+            "hls_url": _hls_proxy_url(call.data[ATTR_ENTRY_ID], session_id),
+            "status": payload.get("status", "running"),
         }
 
     async def _handle_playback_control(call: ServiceCall) -> None:
         runtime = _get_runtime(hass, call.data[ATTR_ENTRY_ID])
         action = call.data[ATTR_ACTION]
         seek_percent = call.data.get(ATTR_SEEK_PERCENT)
-        await runtime.playback.async_control(call.data[ATTR_SESSION_ID], action, seek_percent)
+        await runtime.client.async_playback_control(call.data[ATTR_SESSION_ID], action, seek_percent)
 
     async def _handle_playback_close(call: ServiceCall) -> None:
         runtime = _get_runtime(hass, call.data[ATTR_ENTRY_ID])
-        await runtime.playback.async_close(call.data[ATTR_SESSION_ID])
+        await runtime.client.async_playback_close(call.data[ATTR_SESSION_ID])
 
     hass.services.async_register(DOMAIN, SERVICE_PTZ_MOVE, _handle_ptz_move, schema=ptz_move_schema)
     hass.services.async_register(DOMAIN, SERVICE_PTZ_STOP, _handle_ptz_stop, schema=ptz_stop_schema)

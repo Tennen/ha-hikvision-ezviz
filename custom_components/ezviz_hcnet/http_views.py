@@ -3,17 +3,14 @@
 from __future__ import annotations
 
 from datetime import datetime
-import logging
-from pathlib import Path
 
 from aiohttp import web
 
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.core import HomeAssistant
 
+from .backend_client import AddonApiError
 from .const import DOMAIN
-
-_LOGGER = logging.getLogger(__name__)
 
 
 def _parse_datetime(value: str) -> datetime:
@@ -31,11 +28,17 @@ def _runtime_or_404(hass: HomeAssistant, entry_id: str):
     return runtime
 
 
-def _session_or_404(runtime, session_id: str):
-    session = runtime.playback.current
-    if session is None or session.session_id != session_id:
-        raise web.HTTPNotFound(text=f"playback session '{session_id}' not found")
-    return session
+def _hls_proxy_url(entry_id: str, session_id: str) -> str:
+    return f"/api/{DOMAIN}/{entry_id}/playback/{session_id}/index.m3u8"
+
+
+def _raise_from_addon_error(err: AddonApiError) -> None:
+    message = str(err)
+    if "(404)" in message:
+        raise web.HTTPNotFound(text=message) from err
+    if "(400)" in message:
+        raise web.HTTPBadRequest(text=message) from err
+    raise web.HTTPBadGateway(text=message) from err
 
 
 async def async_register_http_views(hass: HomeAssistant) -> None:
@@ -65,30 +68,21 @@ class EzvizHcnetStatusView(_BaseEzvizView):
     name = "api:ezviz_hcnet:status"
 
     async def get(self, request: web.Request, entry_id: str) -> web.Response:
+        del request
         runtime = _runtime_or_404(self.hass, entry_id)
-        session = runtime.playback.current
-        payload = {
-            "ok": True,
-            "entry_id": entry_id,
-            "connected": runtime.client.available,
-            "host": runtime.client.config.host,
-            "channel": runtime.client.config.channel,
-            "rtsp_url": runtime.client.rtsp_url(),
-            "playback": None,
-        }
-        if session is not None:
-            hls_url = f"/api/{DOMAIN}/{entry_id}/playback/{session.session_id}/index.m3u8"
-            info = session.info(hls_url)
-            progress = await runtime.client.async_run_in_executor(session.get_progress)
-            payload["playback"] = {
-                "session_id": info.session_id,
-                "status": info.status,
-                "hls_url": info.hls_url,
-                "start": info.start.isoformat(),
-                "end": info.end.isoformat(),
-                "last_error": info.last_error,
-                "progress": progress,
-            }
+        try:
+            payload = await runtime.client.async_status()
+        except AddonApiError as err:
+            _raise_from_addon_error(err)
+
+        playback = payload.get("playback")
+        if isinstance(playback, dict):
+            session_id = str(playback.get("session_id", "")).strip()
+            if session_id:
+                playback["hls_url"] = _hls_proxy_url(entry_id, session_id)
+
+        payload["entry_id"] = entry_id
+        payload["ok"] = True
         return self.json(payload)
 
 
@@ -114,20 +108,24 @@ class EzvizHcnetPlaybackOpenView(_BaseEzvizView):
             raise web.HTTPBadRequest(text="end must be later than start")
 
         try:
-            session = await runtime.playback.async_open(start, end)
-        except RuntimeError as err:
-            raise web.HTTPBadRequest(text=str(err)) from err
-        hls_url = f"/api/{DOMAIN}/{entry_id}/playback/{session.session_id}/index.m3u8"
-        info = session.info(hls_url)
+            payload = await runtime.client.async_playback_open(start, end)
+        except AddonApiError as err:
+            _raise_from_addon_error(err)
+
+        session_id = str(payload.get("session_id", "")).strip()
+        if not session_id:
+            raise web.HTTPBadGateway(text="backend did not return session_id")
 
         return self.json(
             {
                 "ok": True,
-                "session_id": info.session_id,
-                "hls_url": info.hls_url,
-                "status": info.status,
-                "start": info.start.isoformat(),
-                "end": info.end.isoformat(),
+                "session_id": session_id,
+                "hls_url": _hls_proxy_url(entry_id, session_id),
+                "status": payload.get("status", "running"),
+                "start": payload.get("start"),
+                "end": payload.get("end"),
+                "progress": payload.get("progress", 0),
+                "last_error": payload.get("last_error"),
             }
         )
 
@@ -151,22 +149,16 @@ class EzvizHcnetPlaybackControlView(_BaseEzvizView):
             seek_percent = float(seek_percent)
 
         try:
-            await runtime.playback.async_control(session_id, action, seek_percent)
-        except ValueError as err:
-            raise web.HTTPBadRequest(text=str(err)) from err
-        except RuntimeError as err:
-            raise web.HTTPNotFound(text=str(err)) from err
+            payload = await runtime.client.async_playback_control(session_id, action, seek_percent)
+        except AddonApiError as err:
+            _raise_from_addon_error(err)
 
-        session = _session_or_404(runtime, session_id)
-        hls_url = f"/api/{DOMAIN}/{entry_id}/playback/{session.session_id}/index.m3u8"
-        info = session.info(hls_url)
-        progress = await runtime.client.async_run_in_executor(session.get_progress)
         return self.json(
             {
                 "ok": True,
-                "session_id": info.session_id,
-                "status": info.status,
-                "progress": progress,
+                "session_id": payload.get("session_id", session_id),
+                "status": payload.get("status", "running"),
+                "progress": payload.get("progress", 0),
             }
         )
 
@@ -176,9 +168,20 @@ class EzvizHcnetPlaybackCloseView(_BaseEzvizView):
     name = "api:ezviz_hcnet:playback_close"
 
     async def delete(self, request: web.Request, entry_id: str, session_id: str) -> web.Response:
+        del request
         runtime = _runtime_or_404(self.hass, entry_id)
-        await runtime.playback.async_close(session_id)
-        return self.json({"ok": True, "session_id": session_id, "status": "closed"})
+        try:
+            payload = await runtime.client.async_playback_close(session_id)
+        except AddonApiError as err:
+            _raise_from_addon_error(err)
+
+        return self.json(
+            {
+                "ok": True,
+                "session_id": payload.get("session_id", session_id),
+                "status": payload.get("status", "closed"),
+            }
+        )
 
 
 class EzvizHcnetPlaybackIndexView(_BaseEzvizView):
@@ -186,14 +189,14 @@ class EzvizHcnetPlaybackIndexView(_BaseEzvizView):
     name = "api:ezviz_hcnet:playback_index"
 
     async def get(self, request: web.Request, entry_id: str, session_id: str) -> web.Response:
+        del request
         runtime = _runtime_or_404(self.hass, entry_id)
-        session = _session_or_404(runtime, session_id)
+        try:
+            data, content_type = await runtime.client.async_fetch_playback_index(session_id)
+        except AddonApiError as err:
+            _raise_from_addon_error(err)
 
-        index_path = session.index_file
-        if not index_path.exists():
-            raise web.HTTPNotFound(text="HLS index is not ready")
-
-        return web.FileResponse(path=index_path, headers={"Content-Type": "application/vnd.apple.mpegurl"})
+        return web.Response(body=data, headers={"Content-Type": content_type})
 
 
 class EzvizHcnetPlaybackSegmentView(_BaseEzvizView):
@@ -201,23 +204,15 @@ class EzvizHcnetPlaybackSegmentView(_BaseEzvizView):
     name = "api:ezviz_hcnet:playback_segment"
 
     async def get(self, request: web.Request, entry_id: str, session_id: str, segment: str) -> web.Response:
+        del request
         runtime = _runtime_or_404(self.hass, entry_id)
-        session = _session_or_404(runtime, session_id)
 
         if "/" in segment or ".." in segment:
             raise web.HTTPBadRequest(text="invalid segment name")
 
-        file_path: Path = session.base_dir / segment
-        if not file_path.exists() or not file_path.is_file():
-            raise web.HTTPNotFound(text="segment not found")
+        try:
+            data, content_type = await runtime.client.async_fetch_playback_segment(session_id, segment)
+        except AddonApiError as err:
+            _raise_from_addon_error(err)
 
-        if segment.endswith(".m3u8"):
-            content_type = "application/vnd.apple.mpegurl"
-        elif segment.endswith(".ts"):
-            content_type = "video/mp2t"
-        elif segment.endswith(".mp4"):
-            content_type = "video/mp4"
-        else:
-            content_type = "application/octet-stream"
-
-        return web.FileResponse(path=file_path, headers={"Content-Type": content_type})
+        return web.Response(body=data, headers={"Content-Type": content_type})

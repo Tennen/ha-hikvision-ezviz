@@ -4,7 +4,7 @@
     "step": {
       "user": {
         "title": "配置萤石 HCNetSDK 设备",
-        "description": "填写设备局域网登录参数。最近 SDK 错误：{sdk_error}",
+        "description": "通过 add-on 后端配置设备局域网登录参数。最近错误：{sdk_error}",
         "data": {
           "name": "名称",
           "host": "设备IP",
@@ -14,6 +14,7 @@
           "channel": "通道",
           "rtsp_port": "RTSP端口",
           "rtsp_path": "RTSP路径模板",
+          "addon_base_url": "Add-on后端URL",
           "sdk_lib_dir_override": "SDK库目录覆盖（可选）",
           "ptz_default_speed": "默认PTZ速度",
           "ptz_step_ms": "PTZ步进时长(ms)"
@@ -21,8 +22,7 @@
       }
     },
     "error": {
-      "cannot_connect": "连接失败，请检查IP/账号/密码",
-      "sdk_load_failed": "SDK加载失败，请检查架构与动态库",
+      "cannot_connect": "连接失败，请检查add-on地址或设备参数",
       "unknown": "未知错误"
     },
     "abort": {

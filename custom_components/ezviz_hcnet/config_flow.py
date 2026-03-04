@@ -12,12 +12,14 @@ from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PASSWORD, CONF_PORT, 
 from homeassistant.data_entry_flow import FlowResult
 
 from .const import (
+    CONF_ADDON_BASE_URL,
     CONF_CHANNEL,
     CONF_PTZ_DEFAULT_SPEED,
     CONF_PTZ_STEP_MS,
     CONF_RTSP_PATH,
     CONF_RTSP_PORT,
     CONF_SDK_LIB_DIR_OVERRIDE,
+    DEFAULT_ADDON_BASE_URL,
     DEFAULT_CHANNEL,
     DEFAULT_PORT,
     DEFAULT_PTZ_SPEED,
@@ -26,8 +28,7 @@ from .const import (
     DEFAULT_RTSP_PORT,
     DOMAIN,
 )
-from .sdk.client import SdkCallError, async_probe_login
-from .sdk.loader import SdkLoadError
+from .backend_client import AddonApiError, async_probe_login
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,6 +45,10 @@ def _user_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             vol.Required(CONF_CHANNEL, default=defaults.get(CONF_CHANNEL, DEFAULT_CHANNEL)): int,
             vol.Required(CONF_RTSP_PORT, default=defaults.get(CONF_RTSP_PORT, DEFAULT_RTSP_PORT)): int,
             vol.Required(CONF_RTSP_PATH, default=defaults.get(CONF_RTSP_PATH, DEFAULT_RTSP_PATH)): str,
+            vol.Required(
+                CONF_ADDON_BASE_URL,
+                default=defaults.get(CONF_ADDON_BASE_URL, DEFAULT_ADDON_BASE_URL),
+            ): str,
             vol.Optional(
                 CONF_SDK_LIB_DIR_OVERRIDE,
                 default=defaults.get(CONF_SDK_LIB_DIR_OVERRIDE, ""),
@@ -81,20 +86,17 @@ class EzvizHcnetConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             try:
                 await async_probe_login(
                     self.hass,
+                    addon_base_url=user_input[CONF_ADDON_BASE_URL],
                     host=host,
                     port=int(user_input[CONF_PORT]),
                     username=user_input[CONF_USERNAME],
                     password=user_input[CONF_PASSWORD],
                     lib_dir_override=sdk_override,
                 )
-            except SdkLoadError as err:
-                _LOGGER.error("SDK load failed during config flow: %s", err)
-                errors["base"] = "sdk_load_failed"
-                sdk_error = str(err)
-            except SdkCallError as err:
-                _LOGGER.warning("SDK login failed during config flow: %s (err=%s)", err, err.error_code)
+            except AddonApiError as err:
+                _LOGGER.warning("Add-on validation failed during config flow: %s", err)
                 errors["base"] = "cannot_connect"
-                sdk_error = f"{err} (code={err.error_code})"
+                sdk_error = str(err)
             except Exception as err:  # pragma: no cover
                 _LOGGER.exception("Unexpected error during config flow")
                 errors["base"] = "unknown"
