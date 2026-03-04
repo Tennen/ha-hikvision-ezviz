@@ -212,6 +212,7 @@ class EzvizHcnetPlaybackCloseView(_BaseEzvizView):
 
 
 class EzvizHcnetPlaybackIndexView(_BaseEzvizView):
+    requires_auth = False
     url = "/api/ezviz_hcnet/{entry_id}/playback/{session_id}/index.m3u8"
     name = "api:ezviz_hcnet:playback_index"
 
@@ -227,6 +228,7 @@ class EzvizHcnetPlaybackIndexView(_BaseEzvizView):
 
 
 class EzvizHcnetPlaybackSegmentView(_BaseEzvizView):
+    requires_auth = False
     url = "/api/ezviz_hcnet/{entry_id}/playback/{session_id}/{segment}"
     name = "api:ezviz_hcnet:playback_segment"
 

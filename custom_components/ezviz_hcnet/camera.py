@@ -25,6 +25,7 @@ class EzvizHcnetCamera(Camera):
     _attr_has_entity_name = True
     _attr_name = "live"
     _attr_supported_features = CameraEntityFeature.STREAM
+    _attr_use_stream_for_stills = True
 
     def __init__(self, entry: ConfigEntry, client) -> None:
         super().__init__()
