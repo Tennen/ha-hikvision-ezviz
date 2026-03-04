@@ -195,7 +195,7 @@ async def api_status(entry_id: str) -> dict:
 async def api_recordings(
     entry_id: str,
     day: date = Query(..., alias="date"),
-    slot_minutes: int = Query(default=15, ge=5, le=60),
+    slot_minutes: int = Query(default=60, ge=5, le=60),
 ) -> dict:
     try:
         return await manager.async_list_recordings(entry_id, day, slot_minutes=slot_minutes)

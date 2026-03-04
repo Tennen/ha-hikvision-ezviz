@@ -6,6 +6,8 @@ class EzvizHcnetPanel extends HTMLElement {
     this._hlsUrl = null;
     this._hls = null;
     this._statusTimer = null;
+    this._liveCard = null;
+    this._liveCardEntityId = null;
     this._dragSeekValue = null;
     this._isPaused = false;
     this._state = {
@@ -29,7 +31,6 @@ class EzvizHcnetPanel extends HTMLElement {
     this._render();
     if (!this._statusTimer) {
       this._refreshStatus();
-      this._loadRecordings();
       this._statusTimer = setInterval(() => this._refreshStatus(), 3000);
     }
   }
@@ -45,8 +46,9 @@ class EzvizHcnetPanel extends HTMLElement {
       this._hlsUrl = null;
       this._dragSeekValue = null;
       this._isPaused = false;
+      this._liveCard = null;
+      this._liveCardEntityId = null;
       this._refreshStatus();
-      this._loadRecordings();
     }
     this._render();
   }
@@ -57,6 +59,8 @@ class EzvizHcnetPanel extends HTMLElement {
       this._statusTimer = null;
     }
     this._destroyHls();
+    this._liveCard = null;
+    this._liveCardEntityId = null;
   }
 
   get _entryId() {
@@ -88,21 +92,41 @@ class EzvizHcnetPanel extends HTMLElement {
     return null;
   }
 
-  _livePreviewUrl() {
+  _mountLiveCard() {
+    const container = this.shadowRoot?.getElementById("liveCardContainer");
+    if (!container) return;
+
     const entityId = this._cameraEntityId();
-    if (!entityId) return null;
-
-    const state = this._hass?.states?.[entityId];
-    const token = state?.attributes?.access_token;
-    let path = `/api/camera_proxy_stream/${entityId}`;
-    if (token) {
-      path += `?token=${encodeURIComponent(token)}`;
+    if (!entityId || !this._hass) {
+      this._liveCard = null;
+      this._liveCardEntityId = null;
+      container.innerHTML = '<div style="padding:14px;" class="muted">未找到对应 camera 实体，无法显示实时画面</div>';
+      return;
     }
 
-    if (this._hass && typeof this._hass.hassUrl === "function") {
-      return this._hass.hassUrl(path);
+    if (!this._liveCard || this._liveCardEntityId !== entityId) {
+      try {
+        const card = document.createElement("hui-picture-entity-card");
+        card.setConfig({
+          type: "picture-entity",
+          entity: entityId,
+          camera_view: "live",
+          show_name: false,
+          show_state: false,
+        });
+        this._liveCard = card;
+        this._liveCardEntityId = entityId;
+      } catch (err) {
+        this._liveCard = null;
+        this._liveCardEntityId = null;
+        container.innerHTML = `<div style="padding:14px;" class="error">加载实时卡片失败: ${String(err)}</div>`;
+        return;
+      }
     }
-    return path;
+
+    container.innerHTML = "";
+    container.appendChild(this._liveCard);
+    this._liveCard.hass = this._hass;
   }
 
   async _refreshStatus() {
@@ -182,7 +206,7 @@ class EzvizHcnetPanel extends HTMLElement {
     try {
       const data = await this._api(
         "get",
-        `ezviz_hcnet/${this._entryId}/recordings?date=${encodeURIComponent(day)}`
+        `ezviz_hcnet/${this._entryId}/recordings?date=${encodeURIComponent(day)}&slot_minutes=60`
       );
       const items = Array.isArray(data?.recordings) ? data.recordings : [];
       this._state.recordings = items;
@@ -351,7 +375,6 @@ class EzvizHcnetPanel extends HTMLElement {
     const playbackPercent = this._dragSeekValue !== null ? Number(this._dragSeekValue) : Number(playback?.progress || 0);
     const previewTime = this._recordingPreviewTime(playbackPercent);
     const selectedRecording = this._selectedRecording();
-    const liveUrl = this._livePreviewUrl();
     const cameraEntityId = this._cameraEntityId();
 
     this.shadowRoot.innerHTML = `
@@ -363,7 +386,9 @@ class EzvizHcnetPanel extends HTMLElement {
         .grid-2 { display:grid; grid-template-columns: 1.2fr 1fr; gap:14px; }
         @media (max-width: 960px) { .grid-2 { grid-template-columns: 1fr; } }
         .live-wrap, .playback-wrap { background: #0f1720; border-radius: 12px; overflow: hidden; }
-        .live-wrap img, .playback-wrap video { width: 100%; display:block; background:#000; min-height: 220px; object-fit: contain; }
+        .playback-wrap video { width: 100%; display:block; background:#000; min-height: 220px; object-fit: contain; }
+        #liveCardContainer { min-height: 220px; }
+        #liveCardContainer > * { display:block; }
         .ptz-grid { display:grid; grid-template-columns: 48px 48px 48px; grid-template-rows: 44px 44px 44px; gap:8px; align-items:center; justify-content:center; }
         button { padding:8px 10px; border-radius:8px; border:1px solid var(--divider-color); background:var(--card-background-color,#fff); cursor:pointer; }
         button.primary { background: var(--primary-color); color:#fff; border:none; }
@@ -384,7 +409,7 @@ class EzvizHcnetPanel extends HTMLElement {
           <div>
             <h3 style="margin:0 0 8px 0;">实时画面</h3>
             <div class="live-wrap">
-              ${liveUrl ? `<img src="${liveUrl}" alt="live" />` : '<div style="padding:14px;" class="muted">未找到对应 camera 实体，无法显示实时画面</div>'}
+              <div id="liveCardContainer"></div>
             </div>
             <div class="muted" style="margin-top:6px;">Camera Entity: ${cameraEntityId || "-"}</div>
           </div>
@@ -473,6 +498,7 @@ class EzvizHcnetPanel extends HTMLElement {
     this.shadowRoot.getElementById("seekRange")?.addEventListener("change", () => this._seekToCurrentDragValue());
     this.shadowRoot.getElementById("seekBtn")?.addEventListener("click", () => this._seekToCurrentDragValue());
 
+    this._mountLiveCard();
     this._bindPlayer();
   }
 }

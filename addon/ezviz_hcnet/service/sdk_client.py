@@ -174,7 +174,7 @@ class HcNetSdkClient:
             self._executor.shutdown(wait=False, cancel_futures=True)
             self._executor_closed = True
 
-    async def async_list_recordings_for_date(self, day: date, slot_minutes: int = 15) -> list[dict]:
+    async def async_list_recordings_for_date(self, day: date, slot_minutes: int = 60) -> list[dict]:
         return await self.async_run_in_executor(self.list_recordings_for_date, day, slot_minutes)
 
     def connect(self) -> None:
@@ -314,7 +314,7 @@ class HcNetSdkClient:
         with self._lock:
             self.env.sdk.NET_DVR_StopPlayBack(handle)
 
-    def list_recordings_for_date(self, day: date, slot_minutes: int = 15) -> list[dict]:
+    def list_recordings_for_date(self, day: date, slot_minutes: int = 60) -> list[dict]:
         if slot_minutes <= 0:
             raise ValueError("slot_minutes must be > 0")
 

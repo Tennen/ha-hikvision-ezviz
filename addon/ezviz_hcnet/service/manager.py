@@ -127,7 +127,7 @@ class EzvizBackendManager:
         payload["status"] = "running"
         return payload
 
-    async def async_list_recordings(self, entry_id: str, day: date, slot_minutes: int = 15) -> dict:
+    async def async_list_recordings(self, entry_id: str, day: date, slot_minutes: int = 60) -> dict:
         managed = await self._get_entry(entry_id)
         recordings = await managed.client.async_list_recordings_for_date(day, slot_minutes=slot_minutes)
         return {
