@@ -114,10 +114,12 @@ class HcNetSdkLoader:
             "libz.so",
             "libhpr.so",
             "libHCCore.so",
-            "libhcnetsdk.so",
-            "libPlayCtrl.so",
+            # libPlayCtrl.so depends on libSuperRender.so and libAudioRender.so
+            # with RPATH="./", so preload dependencies first.
             "libSuperRender.so",
             "libAudioRender.so",
+            "libPlayCtrl.so",
+            "libhcnetsdk.so",
         ]
         for name in ordered:
             self._load_shared(self._lib_dir / name)
