@@ -27,6 +27,7 @@ class EzvizHcnetCamera(Camera):
     _attr_supported_features = CameraEntityFeature.STREAM
 
     def __init__(self, entry: ConfigEntry, client) -> None:
+        super().__init__()
         self._entry = entry
         self._client = client
         self._attr_unique_id = f"{entry.entry_id}_live"
