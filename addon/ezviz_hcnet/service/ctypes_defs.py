@@ -13,8 +13,11 @@ NET_DVR_LOGIN_PASSWD_MAX_LEN = 64
 SERIALNO_LEN = 48
 NAME_LEN = 32
 STREAM_ID_LEN = 32
-ACS_CARD_NO_LEN = 32
+GUID_LEN = 16
+CARDNUM_LEN_OUT = 32
+ACS_CARD_NO_LEN = CARDNUM_LEN_OUT
 NET_DVR_FILE_NAME_LEN = 100
+SPECIAL_FIND_INFO_LEN = 8
 
 
 class NET_DVR_TIME(C.Structure):
@@ -154,33 +157,41 @@ class NET_DVR_VOD_PARA(C.Structure):
 class NET_DVR_FILECOND_V40(C.Structure):
     _pack_ = 1
     _fields_ = [
-        ("dwSize", C.c_uint32),
         ("lChannel", C.c_int32),
-        ("byFindType", C.c_ubyte),
-        ("byQuickSearch", C.c_ubyte),
-        ("byStreamType", C.c_ubyte),
-        ("byFileType", C.c_ubyte),
+        ("dwFileType", C.c_uint32),
+        ("dwIsLocked", C.c_uint32),
+        ("dwUseCardNo", C.c_uint32),
+        ("sCardNumber", C.c_ubyte * CARDNUM_LEN_OUT),
         ("struStartTime", NET_DVR_TIME),
         ("struStopTime", NET_DVR_TIME),
-        ("sCardNumber", C.c_ubyte * ACS_CARD_NO_LEN),
-        ("byRes", C.c_ubyte * 256),
+        ("byDrawFrame", C.c_ubyte),
+        ("byFindType", C.c_ubyte),
+        ("byQuickSearch", C.c_ubyte),
+        ("bySpecialFindInfoType", C.c_ubyte),
+        ("dwVolumeNum", C.c_uint32),
+        ("byWorkingDeviceGUID", C.c_ubyte * GUID_LEN),
+        ("uSpecialFindInfo", C.c_ubyte * SPECIAL_FIND_INFO_LEN),
+        ("byStreamType", C.c_ubyte),
+        ("byAudioFile", C.c_ubyte),
+        ("byRes2", C.c_ubyte * 30),
     ]
 
 
 class NET_DVR_FINDDATA_V40(C.Structure):
     _pack_ = 1
     _fields_ = [
-        ("dwSize", C.c_uint32),
+        ("sFileName", C.c_ubyte * NET_DVR_FILE_NAME_LEN),
         ("struStartTime", NET_DVR_TIME),
         ("struStopTime", NET_DVR_TIME),
         ("dwFileSize", C.c_uint32),
-        ("sFileName", C.c_ubyte * NET_DVR_FILE_NAME_LEN),
-        ("dwFileType", C.c_uint32),
+        ("sCardNum", C.c_ubyte * CARDNUM_LEN_OUT),
         ("byLocked", C.c_ubyte),
-        ("byUseCardNo", C.c_ubyte),
-        ("byRes1", C.c_ubyte * 2),
-        ("sCardNumber", C.c_ubyte * ACS_CARD_NO_LEN),
-        ("byRes", C.c_ubyte * 256),
+        ("byFileType", C.c_ubyte),
+        ("byQuickSearch", C.c_ubyte),
+        ("byRes", C.c_ubyte),
+        ("dwFileIndex", C.c_uint32),
+        ("byStreamType", C.c_ubyte),
+        ("byRes1", C.c_ubyte * 127),
     ]
 
 

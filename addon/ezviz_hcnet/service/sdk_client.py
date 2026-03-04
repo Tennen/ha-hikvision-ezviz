@@ -54,6 +54,12 @@ class SdkCallError(RuntimeError):
         super().__init__(message)
         self.error_code = error_code
 
+    def __str__(self) -> str:
+        message = super().__str__()
+        if self.error_code is None:
+            return message
+        return f"{message} (error_code={self.error_code})"
+
 
 class HcNetSdkEnvironment:
     """Process-wide HCNetSDK lifecycle manager."""
@@ -329,14 +335,19 @@ class HcNetSdkClient:
         day_end = day_start + timedelta(days=1) - timedelta(seconds=1)
 
         cond = NET_DVR_FILECOND_V40()
-        cond.dwSize = C.sizeof(NET_DVR_FILECOND_V40)
         cond.lChannel = int(self.config.channel)
-        cond.byFindType = 0
-        cond.byQuickSearch = 1
-        cond.byStreamType = 0xFF
-        cond.byFileType = 0xFF
+        cond.dwFileType = 0xFF
+        cond.dwIsLocked = 0xFF
+        cond.dwUseCardNo = 0
         cond.struStartTime = to_sdk_time(day_start)
         cond.struStopTime = to_sdk_time(day_end)
+        cond.byDrawFrame = 0
+        cond.byFindType = 0
+        cond.byQuickSearch = 0
+        cond.bySpecialFindInfoType = 0
+        cond.dwVolumeNum = 0
+        cond.byStreamType = 0
+        cond.byAudioFile = 0
 
         with self._lock:
             find_handle = int(self.env.sdk.NET_DVR_FindFile_V40(self.user_id, C.byref(cond)))
@@ -348,7 +359,6 @@ class HcNetSdkClient:
         try:
             while True:
                 data = NET_DVR_FINDDATA_V40()
-                data.dwSize = C.sizeof(NET_DVR_FINDDATA_V40)
                 with self._lock:
                     ret = int(self.env.sdk.NET_DVR_FindNextFile_V40(find_handle, C.byref(data)))
 
@@ -368,8 +378,10 @@ class HcNetSdkClient:
                             "duration_seconds": int((end - start).total_seconds()),
                             "file_name": file_name,
                             "file_size": int(data.dwFileSize),
-                            "file_type": int(data.dwFileType),
+                            "file_type": int(data.byFileType),
                             "locked": bool(data.byLocked),
+                            "file_index": int(data.dwFileIndex),
+                            "stream_type": int(data.byStreamType),
                         }
                     )
                     continue

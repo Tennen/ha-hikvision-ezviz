@@ -95,19 +95,45 @@ class EzvizHcnetPanel extends HTMLElement {
     return null;
   }
 
+  _cameraProxyStreamUrl(entityId) {
+    const state = this._hass?.states?.[entityId];
+    const token = state?.attributes?.access_token;
+    const base = `/api/camera_proxy_stream/${entityId}`;
+    if (!token) return base;
+    return `${base}?token=${encodeURIComponent(token)}`;
+  }
+
   async _buildLiveCard(entityId) {
-    if (!window.loadCardHelpers) {
-      throw new Error("loadCardHelpers is not available");
-    }
-    const helpers = await window.loadCardHelpers();
-    const card = await helpers.createCardElement({
+    const cardConfig = {
       type: "picture-entity",
       entity: entityId,
       camera_view: "live",
       show_name: false,
       show_state: false,
-    });
-    return card;
+    };
+
+    if (typeof window.loadCardHelpers === "function") {
+      const helpers = await window.loadCardHelpers();
+      return helpers.createCardElement(cardConfig);
+    }
+
+    const pictureEntityCard = document.createElement("hui-picture-entity-card");
+    if (typeof pictureEntityCard.setConfig === "function") {
+      pictureEntityCard.setConfig(cardConfig);
+      return pictureEntityCard;
+    }
+
+    const fallback = document.createElement("ha-card");
+    const img = document.createElement("img");
+    img.src = this._cameraProxyStreamUrl(entityId);
+    img.alt = entityId;
+    img.style.width = "100%";
+    img.style.display = "block";
+    img.style.minHeight = "220px";
+    img.style.objectFit = "contain";
+    img.style.background = "#000";
+    fallback.appendChild(img);
+    return fallback;
   }
 
   _mountLiveCard() {
