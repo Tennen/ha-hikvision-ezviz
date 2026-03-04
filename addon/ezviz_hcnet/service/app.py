@@ -5,10 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -189,6 +189,20 @@ async def api_status(entry_id: str) -> dict:
         return await manager.async_status(entry_id)
     except LookupError as err:
         raise _error_404(str(err)) from err
+
+
+@app.get("/entries/{entry_id}/recordings")
+async def api_recordings(
+    entry_id: str,
+    day: date = Query(..., alias="date"),
+    slot_minutes: int = Query(default=15, ge=5, le=60),
+) -> dict:
+    try:
+        return await manager.async_list_recordings(entry_id, day, slot_minutes=slot_minutes)
+    except LookupError as err:
+        raise _error_404(str(err)) from err
+    except (RuntimeError, ValueError) as err:
+        raise _error_400(str(err)) from err
 
 
 @app.post("/entries/{entry_id}/ptz/move")

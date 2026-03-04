@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from .playback import PlaybackSession, PlaybackSessionManager
@@ -126,6 +126,17 @@ class EzvizBackendManager:
         payload = _session_payload(session, progress=progress)
         payload["status"] = "running"
         return payload
+
+    async def async_list_recordings(self, entry_id: str, day: date, slot_minutes: int = 15) -> dict:
+        managed = await self._get_entry(entry_id)
+        recordings = await managed.client.async_list_recordings_for_date(day, slot_minutes=slot_minutes)
+        return {
+            "ok": True,
+            "entry_id": entry_id,
+            "date": day.isoformat(),
+            "count": len(recordings),
+            "recordings": recordings,
+        }
 
     async def async_playback_control(
         self,

@@ -47,6 +47,7 @@ async def async_register_http_views(hass: HomeAssistant) -> None:
         return
 
     hass.http.register_view(EzvizHcnetStatusView(hass))
+    hass.http.register_view(EzvizHcnetRecordingsView(hass))
     hass.http.register_view(EzvizHcnetPlaybackOpenView(hass))
     hass.http.register_view(EzvizHcnetPlaybackControlView(hass))
     hass.http.register_view(EzvizHcnetPlaybackCloseView(hass))
@@ -83,6 +84,32 @@ class EzvizHcnetStatusView(_BaseEzvizView):
 
         payload["entry_id"] = entry_id
         payload["ok"] = True
+        return self.json(payload)
+
+
+class EzvizHcnetRecordingsView(_BaseEzvizView):
+    url = "/api/ezviz_hcnet/{entry_id}/recordings"
+    name = "api:ezviz_hcnet:recordings"
+
+    async def get(self, request: web.Request, entry_id: str) -> web.Response:
+        runtime = _runtime_or_404(self.hass, entry_id)
+        day = (request.query.get("date") or "").strip()
+        if not day:
+            raise web.HTTPBadRequest(text="date query is required (YYYY-MM-DD)")
+
+        slot_minutes_raw = (request.query.get("slot_minutes") or "15").strip()
+        try:
+            slot_minutes = int(slot_minutes_raw)
+        except ValueError as err:
+            raise web.HTTPBadRequest(text="slot_minutes must be integer") from err
+
+        try:
+            payload = await runtime.client.async_list_recordings(day, slot_minutes=slot_minutes)
+        except AddonApiError as err:
+            _raise_from_addon_error(err)
+
+        payload["ok"] = True
+        payload["entry_id"] = entry_id
         return self.json(payload)
 
 

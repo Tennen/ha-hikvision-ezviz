@@ -8,7 +8,7 @@ import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, time, timedelta
 from functools import partial
 from pathlib import Path
 
@@ -174,6 +174,9 @@ class HcNetSdkClient:
             self._executor.shutdown(wait=False, cancel_futures=True)
             self._executor_closed = True
 
+    async def async_list_recordings_for_date(self, day: date, slot_minutes: int = 15) -> list[dict]:
+        return await self.async_run_in_executor(self.list_recordings_for_date, day, slot_minutes)
+
     def connect(self) -> None:
         with self._lock:
             if self._user_id is not None:
@@ -310,6 +313,60 @@ class HcNetSdkClient:
     def playback_close(self, handle: int) -> None:
         with self._lock:
             self.env.sdk.NET_DVR_StopPlayBack(handle)
+
+    def list_recordings_for_date(self, day: date, slot_minutes: int = 15) -> list[dict]:
+        if slot_minutes <= 0:
+            raise ValueError("slot_minutes must be > 0")
+
+        slot = timedelta(minutes=slot_minutes)
+        day_start = datetime.combine(day, time.min)
+        day_end = day_start + timedelta(days=1)
+
+        intervals: list[tuple[datetime, datetime]] = []
+        cursor = day_start
+        while cursor < day_end:
+            window_end = min(cursor + slot, day_end)
+            if self._has_recording_interval(cursor, window_end):
+                intervals.append((cursor, window_end))
+            cursor = window_end
+
+        if not intervals:
+            return []
+
+        merged: list[tuple[datetime, datetime]] = []
+        for start, end in intervals:
+            if not merged:
+                merged.append((start, end))
+                continue
+            prev_start, prev_end = merged[-1]
+            if start <= prev_end:
+                merged[-1] = (prev_start, max(prev_end, end))
+            else:
+                merged.append((start, end))
+
+        return [
+            {
+                "id": f"{item_start.isoformat()}_{item_end.isoformat()}",
+                "start": item_start.isoformat(),
+                "end": item_end.isoformat(),
+                "duration_seconds": int((item_end - item_start).total_seconds()),
+            }
+            for item_start, item_end in merged
+        ]
+
+    def _has_recording_interval(self, start: datetime, end: datetime) -> bool:
+        handle: int | None = None
+        try:
+            handle = self.playback_open(start, end)
+            return handle >= 0
+        except SdkCallError:
+            return False
+        finally:
+            if handle is not None:
+                try:
+                    self.playback_close(handle)
+                except Exception:
+                    pass
 
     def _login_blocking(self, host: str, port: int, username: str, password: str) -> LoginResult:
         login = NET_DVR_USER_LOGIN_INFO()

@@ -6,20 +6,48 @@ class EzvizHcnetPanel extends HTMLElement {
     this._hlsUrl = null;
     this._hls = null;
     this._statusTimer = null;
-    this._state = { loading: false, error: "", status: null };
+    this._dragSeekValue = null;
+    this._isPaused = false;
+    this._state = {
+      loading: false,
+      error: "",
+      status: null,
+      recordingsDate: "",
+      recordings: [],
+      selectedRecordingId: null,
+      loadingRecordings: false,
+    };
   }
 
   set hass(hass) {
     this._hass = hass;
+
+    if (!this._state.recordingsDate) {
+      this._state.recordingsDate = this._todayDateString();
+    }
+
     this._render();
     if (!this._statusTimer) {
       this._refreshStatus();
+      this._loadRecordings();
       this._statusTimer = setInterval(() => this._refreshStatus(), 3000);
     }
   }
 
   set panel(panel) {
+    const prevEntryId = this._entryId;
     this._panel = panel;
+    const nextEntryId = this._entryId;
+    if (nextEntryId && nextEntryId !== prevEntryId) {
+      this._state.recordings = [];
+      this._state.selectedRecordingId = null;
+      this._sessionId = null;
+      this._hlsUrl = null;
+      this._dragSeekValue = null;
+      this._isPaused = false;
+      this._refreshStatus();
+      this._loadRecordings();
+    }
     this._render();
   }
 
@@ -40,6 +68,43 @@ class EzvizHcnetPanel extends HTMLElement {
     return this._hass.callApi(method, path, body);
   }
 
+  _todayDateString() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, "0");
+    const d = String(now.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+
+  _cameraEntityId() {
+    if (!this._hass || !this._entryId) return null;
+    const states = this._hass.states || {};
+    for (const [entityId, state] of Object.entries(states)) {
+      if (!entityId.startsWith("camera.")) continue;
+      if (state?.attributes?.entry_id === this._entryId) {
+        return entityId;
+      }
+    }
+    return null;
+  }
+
+  _livePreviewUrl() {
+    const entityId = this._cameraEntityId();
+    if (!entityId) return null;
+
+    const state = this._hass?.states?.[entityId];
+    const token = state?.attributes?.access_token;
+    let path = `/api/camera_proxy_stream/${entityId}`;
+    if (token) {
+      path += `?token=${encodeURIComponent(token)}`;
+    }
+
+    if (this._hass && typeof this._hass.hassUrl === "function") {
+      return this._hass.hassUrl(path);
+    }
+    return path;
+  }
+
   async _refreshStatus() {
     if (!this._entryId || !this._hass) return;
     try {
@@ -48,7 +113,26 @@ class EzvizHcnetPanel extends HTMLElement {
       if (status?.playback?.session_id) {
         this._sessionId = status.playback.session_id;
         this._hlsUrl = status.playback.hls_url;
+      } else {
+        this._sessionId = null;
+        this._hlsUrl = null;
+        this._isPaused = false;
       }
+      this._state.error = "";
+    } catch (err) {
+      this._state.error = String(err);
+    }
+    this._render();
+  }
+
+  async _callPtz(direction) {
+    if (!this._hass || !this._entryId) return;
+    try {
+      await this._hass.callService("ezviz_hcnet", "ptz_move", {
+        entry_id: this._entryId,
+        direction,
+        duration_ms: 400,
+      });
       this._state.error = "";
     } catch (err) {
       this._state.error = String(err);
@@ -61,11 +145,78 @@ class EzvizHcnetPanel extends HTMLElement {
     return el ? el.value : "";
   }
 
-  async _openPlayback() {
-    const start = this._readInput("startTime");
-    const end = this._readInput("endTime");
-    if (!start || !end) {
-      this._state.error = "请先填写开始和结束时间";
+  _selectedRecording() {
+    const id = this._state.selectedRecordingId;
+    if (!id) return null;
+    return this._state.recordings.find((item) => item.id === id) || null;
+  }
+
+  _formatDateTime(text) {
+    if (!text) return "-";
+    try {
+      const dt = new Date(text);
+      if (Number.isNaN(dt.getTime())) return text;
+      return dt.toLocaleString();
+    } catch (_err) {
+      return text;
+    }
+  }
+
+  _formatDuration(seconds) {
+    const s = Math.max(0, Number(seconds) || 0);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    if (h > 0) return `${h}h ${m}m ${sec}s`;
+    return `${m}m ${sec}s`;
+  }
+
+  async _loadRecordings() {
+    if (!this._entryId || !this._hass) return;
+    const day = this._state.recordingsDate || this._todayDateString();
+
+    this._state.loadingRecordings = true;
+    this._state.error = "";
+    this._render();
+
+    try {
+      const data = await this._api(
+        "get",
+        `ezviz_hcnet/${this._entryId}/recordings?date=${encodeURIComponent(day)}`
+      );
+      const items = Array.isArray(data?.recordings) ? data.recordings : [];
+      this._state.recordings = items;
+      if (!items.find((item) => item.id === this._state.selectedRecordingId)) {
+        this._state.selectedRecordingId = items[0]?.id || null;
+      }
+      this._state.error = "";
+    } catch (err) {
+      this._state.error = String(err);
+      this._state.recordings = [];
+      this._state.selectedRecordingId = null;
+    } finally {
+      this._state.loadingRecordings = false;
+      this._render();
+    }
+  }
+
+  _recordingPreviewTime(percent) {
+    const rec = this._selectedRecording();
+    if (!rec?.start || !rec?.end) return "-";
+
+    const start = new Date(rec.start);
+    const end = new Date(rec.end);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return "-";
+
+    const ratio = Math.max(0, Math.min(100, Number(percent) || 0)) / 100;
+    const ts = start.getTime() + (end.getTime() - start.getTime()) * ratio;
+    return new Date(ts).toLocaleString();
+  }
+
+  async _openSelectedPlayback() {
+    const rec = this._selectedRecording();
+    if (!rec) {
+      this._state.error = "请先选择录像片段";
       this._render();
       return;
     }
@@ -76,11 +227,13 @@ class EzvizHcnetPanel extends HTMLElement {
 
     try {
       const resp = await this._api("post", `ezviz_hcnet/${this._entryId}/playback/session`, {
-        start,
-        end,
+        start: rec.start,
+        end: rec.end,
       });
       this._sessionId = resp.session_id;
       this._hlsUrl = resp.hls_url;
+      this._isPaused = false;
+      this._dragSeekValue = null;
       await this._refreshStatus();
     } catch (err) {
       this._state.error = String(err);
@@ -101,11 +254,30 @@ class EzvizHcnetPanel extends HTMLElement {
       const body = { action };
       if (seekPercent !== null) body.seek_percent = Number(seekPercent);
       await this._api("post", `ezviz_hcnet/${this._entryId}/playback/${this._sessionId}/control`, body);
+      this._state.error = "";
       await this._refreshStatus();
     } catch (err) {
       this._state.error = String(err);
       this._render();
     }
+  }
+
+  async _togglePausePlay() {
+    if (this._isPaused) {
+      await this._control("play");
+      this._isPaused = false;
+    } else {
+      await this._control("pause");
+      this._isPaused = true;
+    }
+    this._render();
+  }
+
+  async _seekToCurrentDragValue() {
+    if (this._dragSeekValue === null) return;
+    const v = Number(this._dragSeekValue);
+    this._dragSeekValue = null;
+    await this._control("seek", v);
   }
 
   async _closePlayback() {
@@ -117,6 +289,8 @@ class EzvizHcnetPanel extends HTMLElement {
     }
     this._sessionId = null;
     this._hlsUrl = null;
+    this._isPaused = false;
+    this._dragSeekValue = null;
     this._destroyHls();
     await this._refreshStatus();
   }
@@ -147,63 +321,158 @@ class EzvizHcnetPanel extends HTMLElement {
     video.src = this._hlsUrl;
   }
 
+  _renderRecordingsList() {
+    const items = this._state.recordings;
+    if (!items.length) {
+      return '<div class="muted">当天未检测到录像片段</div>';
+    }
+
+    return `
+      <div class="recordings-list">
+        ${items
+          .map((item) => {
+            const selected = item.id === this._state.selectedRecordingId ? "selected" : "";
+            return `
+              <button class="recording-item ${selected}" data-recording-id="${item.id}">
+                <div>${this._formatDateTime(item.start)} - ${this._formatDateTime(item.end)}</div>
+                <div class="muted">时长: ${this._formatDuration(item.duration_seconds)}</div>
+              </button>
+            `;
+          })
+          .join("")}
+      </div>
+    `;
+  }
+
   _render() {
     if (!this.shadowRoot) return;
     const status = this._state.status;
     const playback = status?.playback || null;
-    const progress = playback?.progress ?? 0;
+    const playbackPercent = this._dragSeekValue !== null ? Number(this._dragSeekValue) : Number(playback?.progress || 0);
+    const previewTime = this._recordingPreviewTime(playbackPercent);
+    const selectedRecording = this._selectedRecording();
+    const liveUrl = this._livePreviewUrl();
+    const cameraEntityId = this._cameraEntityId();
 
     this.shadowRoot.innerHTML = `
       <style>
         :host { display:block; padding:16px; box-sizing:border-box; }
         .card { background: var(--ha-card-background, #fff); border-radius:12px; padding:16px; box-shadow: var(--ha-card-box-shadow, 0 2px 8px rgba(0,0,0,.12)); }
-        .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
-        label { min-width:88px; color:var(--primary-text-color); }
-        input, button { font-size:14px; }
-        input[type="datetime-local"] { padding:6px 8px; }
-        button { padding:8px 12px; border-radius:8px; border:1px solid var(--divider-color); background:var(--card-background-color,#fff); cursor:pointer; }
+        .section-title { margin: 0 0 8px 0; font-size: 18px; }
+        .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
+        .grid-2 { display:grid; grid-template-columns: 1.2fr 1fr; gap:14px; }
+        @media (max-width: 960px) { .grid-2 { grid-template-columns: 1fr; } }
+        .live-wrap, .playback-wrap { background: #0f1720; border-radius: 12px; overflow: hidden; }
+        .live-wrap img, .playback-wrap video { width: 100%; display:block; background:#000; min-height: 220px; object-fit: contain; }
+        .ptz-grid { display:grid; grid-template-columns: 48px 48px 48px; grid-template-rows: 44px 44px 44px; gap:8px; align-items:center; justify-content:center; }
+        button { padding:8px 10px; border-radius:8px; border:1px solid var(--divider-color); background:var(--card-background-color,#fff); cursor:pointer; }
         button.primary { background: var(--primary-color); color:#fff; border:none; }
         .muted { color: var(--secondary-text-color); font-size:13px; }
         .error { color: var(--error-color); font-size:13px; white-space: pre-wrap; }
-        video { width:100%; max-height:60vh; background:#000; border-radius:10px; }
-        .slider { width:320px; max-width:100%; }
+        .recordings-list { max-height: 260px; overflow:auto; display:flex; flex-direction:column; gap:8px; }
+        .recording-item { text-align:left; width:100%; }
+        .recording-item.selected { outline: 2px solid var(--primary-color); }
+        .slider { width: 340px; max-width: 100%; }
+        input[type="date"] { padding: 6px 8px; }
       </style>
       <div class="card">
-        <h2>EZVIZ HCNet 回放面板</h2>
+        <h2 class="section-title">EZVIZ HCNet 控制面板</h2>
         <div class="muted">Entry: ${this._entryId || "-"}</div>
         <div class="muted">设备: ${status?.host || "-"} / 通道: ${status?.channel ?? "-"} / 连接: ${status?.connected ? "在线" : "离线"}</div>
-        <div class="row">
-          <label>开始时间</label>
-          <input id="startTime" type="datetime-local" />
-          <label>结束时间</label>
-          <input id="endTime" type="datetime-local" />
-          <button class="primary" id="openBtn">打开回放</button>
-          <button id="closeBtn">关闭会话</button>
+
+        <div class="grid-2" style="margin-top:12px;">
+          <div>
+            <h3 style="margin:0 0 8px 0;">实时画面</h3>
+            <div class="live-wrap">
+              ${liveUrl ? `<img src="${liveUrl}" alt="live" />` : '<div style="padding:14px;" class="muted">未找到对应 camera 实体，无法显示实时画面</div>'}
+            </div>
+            <div class="muted" style="margin-top:6px;">Camera Entity: ${cameraEntityId || "-"}</div>
+          </div>
+
+          <div>
+            <h3 style="margin:0 0 8px 0;">云台控制</h3>
+            <div class="ptz-grid">
+              <div></div>
+              <button id="ptz-up" title="向上">↑</button>
+              <div></div>
+              <button id="ptz-left" title="向左">←</button>
+              <div></div>
+              <button id="ptz-right" title="向右">→</button>
+              <div></div>
+              <button id="ptz-down" title="向下">↓</button>
+              <div></div>
+            </div>
+          </div>
         </div>
+
+        <hr style="margin:16px 0; border:none; border-top:1px solid var(--divider-color);"/>
+
+        <h3 style="margin:0 0 8px 0;">录像回放</h3>
         <div class="row">
-          <button id="playBtn">播放</button>
-          <button id="pauseBtn">暂停</button>
-          <label>定位</label>
-          <input class="slider" id="seekRange" type="range" min="0" max="100" step="1" value="${progress}" />
-          <span>${progress}%</span>
-          <button id="seekBtn">跳转</button>
+          <label>日期</label>
+          <input id="recordingDate" type="date" value="${this._state.recordingsDate}" />
+          <button id="loadRecordingsBtn">查询录像</button>
+          <span class="muted">当天录像片段数: ${this._state.recordings.length}</span>
+          ${this._state.loadingRecordings ? '<span class="muted">加载中...</span>' : ""}
         </div>
-        <div class="muted">会话: ${playback?.session_id || "-"} / 状态: ${playback?.status || "-"}</div>
+
+        ${this._renderRecordingsList()}
+
+        <div class="row" style="margin-top:10px;">
+          <button class="primary" id="openSelectedBtn" ${selectedRecording ? "" : "disabled"}>播放选中片段</button>
+          <button id="closePlaybackBtn" ${this._sessionId ? "" : "disabled"}>关闭会话</button>
+          <span class="muted">当前会话: ${this._sessionId || "-"}</span>
+        </div>
+
+        <div class="playback-wrap" style="margin-top:10px;">
+          ${this._hlsUrl ? `<video id="player" controls autoplay></video>` : '<div style="padding:14px;" class="muted">请先选择录像片段并点击播放</div>'}
+        </div>
+
+        <div class="row" style="margin-top:10px;">
+          <button id="pausePlayBtn" ${this._sessionId ? "" : "disabled"}>${this._isPaused ? "播放" : "暂停"}</button>
+          <input class="slider" id="seekRange" type="range" min="0" max="100" step="1" value="${playbackPercent}" ${this._sessionId ? "" : "disabled"} />
+          <span>${Math.round(playbackPercent)}%</span>
+          <button id="seekBtn" ${this._sessionId ? "" : "disabled"}>拖动后定位</button>
+          <span class="muted">目标时间: ${previewTime}</span>
+        </div>
+
         ${this._state.error ? `<div class="error">${this._state.error}</div>` : ""}
-        <div style="margin-top:12px;">
-          ${this._hlsUrl ? `<video id="player" controls autoplay src="${this._hlsUrl}"></video>` : '<div class="muted">请先打开回放会话</div>'}
-        </div>
       </div>
     `;
 
-    this.shadowRoot.getElementById("openBtn")?.addEventListener("click", () => this._openPlayback());
-    this.shadowRoot.getElementById("closeBtn")?.addEventListener("click", () => this._closePlayback());
-    this.shadowRoot.getElementById("playBtn")?.addEventListener("click", () => this._control("play"));
-    this.shadowRoot.getElementById("pauseBtn")?.addEventListener("click", () => this._control("pause"));
-    this.shadowRoot.getElementById("seekBtn")?.addEventListener("click", () => {
-      const val = this._readInput("seekRange");
-      this._control("seek", val);
+    this.shadowRoot.getElementById("ptz-up")?.addEventListener("click", () => this._callPtz("up"));
+    this.shadowRoot.getElementById("ptz-down")?.addEventListener("click", () => this._callPtz("down"));
+    this.shadowRoot.getElementById("ptz-left")?.addEventListener("click", () => this._callPtz("left"));
+    this.shadowRoot.getElementById("ptz-right")?.addEventListener("click", () => this._callPtz("right"));
+
+    this.shadowRoot.getElementById("recordingDate")?.addEventListener("change", (ev) => {
+      this._state.recordingsDate = ev.target.value || this._todayDateString();
+      this._loadRecordings();
     });
+    this.shadowRoot.getElementById("loadRecordingsBtn")?.addEventListener("click", () => {
+      const val = this._readInput("recordingDate") || this._todayDateString();
+      this._state.recordingsDate = val;
+      this._loadRecordings();
+    });
+
+    this.shadowRoot.querySelectorAll(".recording-item").forEach((el) => {
+      el.addEventListener("click", () => {
+        this._state.selectedRecordingId = el.getAttribute("data-recording-id");
+        this._render();
+      });
+    });
+
+    this.shadowRoot.getElementById("openSelectedBtn")?.addEventListener("click", () => this._openSelectedPlayback());
+    this.shadowRoot.getElementById("closePlaybackBtn")?.addEventListener("click", () => this._closePlayback());
+
+    this.shadowRoot.getElementById("pausePlayBtn")?.addEventListener("click", () => this._togglePausePlay());
+    this.shadowRoot.getElementById("seekRange")?.addEventListener("input", (ev) => {
+      this._dragSeekValue = Number(ev.target.value);
+      this._render();
+    });
+    this.shadowRoot.getElementById("seekRange")?.addEventListener("change", () => this._seekToCurrentDragValue());
+    this.shadowRoot.getElementById("seekBtn")?.addEventListener("click", () => this._seekToCurrentDragValue());
+
     this._bindPlayer();
   }
 }

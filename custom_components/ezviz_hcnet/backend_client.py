@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 from typing import Any
+from urllib.parse import quote
 
 from aiohttp import ClientError, ClientResponse, ClientTimeout
 
@@ -14,7 +15,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .models import DeviceConfig
 
-_REQUEST_TIMEOUT = ClientTimeout(total=30)
+_REQUEST_TIMEOUT = ClientTimeout(total=90)
 
 
 class AddonApiError(HomeAssistantError):
@@ -160,6 +161,13 @@ class AddonEntryClient:
                 "start": start.isoformat(),
                 "end": end.isoformat(),
             },
+        )
+
+    async def async_list_recordings(self, day: str, slot_minutes: int = 15) -> dict[str, Any]:
+        day_q = quote(day.strip())
+        return await self._api.request_json(
+            "get",
+            f"/entries/{self.entry_id}/recordings?date={day_q}&slot_minutes={int(slot_minutes)}",
         )
 
     async def async_playback_control(self, session_id: str, action: str, seek_percent: float | None = None) -> dict[str, Any]:

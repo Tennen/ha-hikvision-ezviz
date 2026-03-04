@@ -60,4 +60,11 @@ Playback HLS files are temporary under:
 
 - `/tmp/ezviz_hcnet/<entry_id>/<session_id>`
 
+Panel features:
+
+- Default live camera preview
+- 4-direction PTZ controls (up/down/left/right)
+- Select date -> list detected recording segments for that day -> choose one segment to play
+- Playback seek by timeline slider and pause/play control
+
 No persistent recording files are kept.
