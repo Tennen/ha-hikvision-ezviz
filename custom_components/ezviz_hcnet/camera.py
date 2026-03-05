@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 
 from homeassistant.components.camera import Camera, CameraEntityFeature
-from homeassistant.components.stream import async_get_image
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -13,6 +12,11 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import CONF_CHANNEL, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+
+try:  # pragma: no cover - depends on HA version
+    from homeassistant.components.stream import StreamType
+except ImportError:  # pragma: no cover
+    StreamType = None
 
 
 async def async_setup_entry(
@@ -31,6 +35,8 @@ class EzvizHcnetCamera(Camera):
     _attr_name = "live"
     _attr_supported_features = CameraEntityFeature.STREAM
     _attr_use_stream_for_stills = True
+    if StreamType is not None:  # pragma: no cover - depends on HA version
+        _attr_frontend_stream_type = StreamType.HLS
 
     def __init__(self, entry: ConfigEntry, client) -> None:
         super().__init__()
@@ -58,13 +64,38 @@ class EzvizHcnetCamera(Camera):
         if not source:
             return None
 
+        image_fetchers = []
+        try:  # pragma: no cover - depends on HA version
+            from homeassistant.components.stream import async_get_image as stream_async_get_image
+
+            image_fetchers.append(stream_async_get_image)
+        except ImportError:
+            pass
+
+        try:  # pragma: no cover - depends on HA version
+            from homeassistant.components.camera import async_get_image as camera_async_get_image
+
+            image_fetchers.append(camera_async_get_image)
+        except ImportError:
+            pass
+
+        if not image_fetchers:
+            _LOGGER.debug("No async_get_image helper found in current Home Assistant version")
+            return None
+
         try:
-            image = await async_get_image(self.hass, source, width=width, height=height)
+            for fetcher in image_fetchers:
+                image = await fetcher(self.hass, source, width=width, height=height)
+                if isinstance(image, (bytes, bytearray)):
+                    return bytes(image)
+                content = getattr(image, "content", None)
+                if isinstance(content, (bytes, bytearray)):
+                    return bytes(content)
         except Exception:  # pragma: no cover - depends on runtime stream backend
             _LOGGER.debug("Failed to fetch still image from stream source", exc_info=True)
             return None
 
-        return image.content
+        return None
 
     async def async_update(self) -> None:
         return
