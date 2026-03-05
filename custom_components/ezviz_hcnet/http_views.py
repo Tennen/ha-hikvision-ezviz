@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 
 from aiohttp import web
@@ -219,12 +220,22 @@ class EzvizHcnetPlaybackIndexView(_BaseEzvizView):
     async def get(self, request: web.Request, entry_id: str, session_id: str) -> web.Response:
         del request
         runtime = _runtime_or_404(self.hass, entry_id)
-        try:
-            data, content_type = await runtime.client.async_fetch_playback_index(session_id)
-        except AddonApiError as err:
-            _raise_from_addon_error(err)
 
-        return web.Response(body=data, headers={"Content-Type": content_type})
+        attempts = 20
+        delay_s = 0.15
+        for _ in range(attempts):
+            try:
+                data, content_type = await runtime.client.async_fetch_playback_index(session_id)
+                return web.Response(body=data, headers={"Content-Type": content_type, "Cache-Control": "no-store"})
+            except AddonApiError as err:
+                message = str(err)
+                # Newly-opened playback may need a short time before ffmpeg writes index.m3u8.
+                if "(404)" in message and "HLS index is not ready" in message:
+                    await asyncio.sleep(delay_s)
+                    continue
+                _raise_from_addon_error(err)
+
+        raise web.HTTPServiceUnavailable(text="playback index not ready")
 
 
 class EzvizHcnetPlaybackSegmentView(_BaseEzvizView):
@@ -244,4 +255,4 @@ class EzvizHcnetPlaybackSegmentView(_BaseEzvizView):
         except AddonApiError as err:
             _raise_from_addon_error(err)
 
-        return web.Response(body=data, headers={"Content-Type": content_type})
+        return web.Response(body=data, headers={"Content-Type": content_type, "Cache-Control": "no-store"})

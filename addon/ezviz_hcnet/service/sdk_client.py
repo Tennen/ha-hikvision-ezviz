@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from functools import partial
 from pathlib import Path
+from urllib.parse import quote
 
 from .const import (
     DEFAULT_PTZ_SPEED,
@@ -136,8 +137,14 @@ class DeviceConfig:
             path = self.rtsp_path.format(channel=self.channel)
         except Exception:
             path = self.rtsp_path
+
+        if not path.startswith("/"):
+            path = f"/{path}"
+
+        username = quote(self.username, safe="")
+        password = quote(self.password, safe="")
         return (
-            f"rtsp://{self.username}:{self.password}@"
+            f"rtsp://{username}:{password}@"
             f"{self.host}:{self.rtsp_port}{path}"
         )
 

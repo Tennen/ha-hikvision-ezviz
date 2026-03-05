@@ -1,7 +1,7 @@
 {
   "domain": "ezviz_hcnet",
   "name": "EZVIZ HCNet SDK",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "config_flow": true,
   "iot_class": "local_push",
   "dependencies": ["stream", "panel_custom", "frontend"],

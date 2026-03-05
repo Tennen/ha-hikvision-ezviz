@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from urllib.parse import quote
 
 from .const import (
     DEFAULT_CHANNEL,
@@ -33,7 +34,13 @@ class DeviceConfig:
             path = self.rtsp_path.format(channel=self.channel)
         except Exception:
             path = self.rtsp_path
+
+        if not path.startswith("/"):
+            path = f"/{path}"
+
+        username = quote(self.username, safe="")
+        password = quote(self.password, safe="")
         return (
-            f"rtsp://{self.username}:{self.password}@"
+            f"rtsp://{username}:{password}@"
             f"{self.host}:{self.rtsp_port}{path}"
         )

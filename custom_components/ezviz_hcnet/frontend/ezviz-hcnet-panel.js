@@ -399,6 +399,26 @@ class EzvizHcnetPanel extends HTMLElement {
     const HlsCtor = window.Hls;
     if (HlsCtor && typeof HlsCtor.isSupported === "function" && HlsCtor.isSupported()) {
       this._hls = new HlsCtor();
+      if (
+        typeof this._hls.on === "function" &&
+        HlsCtor.Events &&
+        HlsCtor.ErrorTypes
+      ) {
+        this._hls.on(HlsCtor.Events.ERROR, (_event, data) => {
+          if (!data?.fatal) return;
+          if (data.type === HlsCtor.ErrorTypes.NETWORK_ERROR) {
+            this._hls.startLoad();
+            return;
+          }
+          if (data.type === HlsCtor.ErrorTypes.MEDIA_ERROR) {
+            this._hls.recoverMediaError();
+            return;
+          }
+          this._state.error = `播放流错误: ${String(data.details || "unknown")}`;
+          this._destroyHls();
+          this._render();
+        });
+      }
       this._hls.loadSource(this._hlsUrl);
       this._hls.attachMedia(video);
       return;
