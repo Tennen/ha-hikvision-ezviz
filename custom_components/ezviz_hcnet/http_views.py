@@ -187,6 +187,7 @@ class EzvizHcnetPlaybackControlView(_BaseEzvizView):
                 "session_id": payload.get("session_id", session_id),
                 "status": payload.get("status", "running"),
                 "progress": payload.get("progress", 0),
+                "paused": bool(payload.get("paused", False)),
             }
         )
 

@@ -1,5 +1,5 @@
 name: EZVIZ HCNet SDK Backend
-version: "0.1.8"
+version: "0.1.9"
 slug: ezviz_hcnet_backend
 description: HCNetSDK backend service for ezviz_hcnet integration (glibc-based)
 url: https://github.com/chentianyu/ha-hikvision-ezviz

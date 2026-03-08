@@ -5,6 +5,9 @@ class EzvizHcnetPanel extends HTMLElement {
     this._sessionId = null;
     this._hlsUrl = null;
     this._hls = null;
+    this._boundHlsUrl = null;
+    this._statusTimer = null;
+    this._liveReconnectTimer = null;
     this._liveCard = null;
     this._liveCardEntityId = null;
     this._liveCardBuildTask = null;
@@ -44,6 +47,8 @@ class EzvizHcnetPanel extends HTMLElement {
     if (!this._liveCard && this._cameraEntityId()) {
       this._render();
     }
+
+    this._syncPlaybackUi();
   }
 
   set panel(panel) {
@@ -66,6 +71,14 @@ class EzvizHcnetPanel extends HTMLElement {
   }
 
   disconnectedCallback() {
+    if (this._statusTimer) {
+      clearInterval(this._statusTimer);
+      this._statusTimer = null;
+    }
+    if (this._liveReconnectTimer) {
+      clearTimeout(this._liveReconnectTimer);
+      this._liveReconnectTimer = null;
+    }
     this._destroyHls();
     this._liveCard = null;
     this._liveCardEntityId = null;
@@ -101,43 +114,30 @@ class EzvizHcnetPanel extends HTMLElement {
     return null;
   }
 
-  _cameraProxyStreamUrl(entityId) {
-    const state = this._hass?.states?.[entityId];
-    const token = state?.attributes?.access_token;
+  _cameraProxyStreamUrl(entityId, cacheBust = false) {
     const base = `/api/camera_proxy_stream/${entityId}`;
-    if (!token) return base;
-    return `${base}?token=${encodeURIComponent(token)}`;
+    if (!cacheBust) return base;
+    return `${base}?_t=${Date.now()}`;
   }
 
   async _buildLiveCard(entityId) {
-    const cardConfig = {
-      type: "picture-entity",
-      entity: entityId,
-      camera_view: "live",
-      show_name: false,
-      show_state: false,
-    };
-
-    if (typeof window.loadCardHelpers === "function") {
-      const helpers = await window.loadCardHelpers();
-      return helpers.createCardElement(cardConfig);
-    }
-
-    const pictureEntityCard = document.createElement("hui-picture-entity-card");
-    if (typeof pictureEntityCard.setConfig === "function") {
-      pictureEntityCard.setConfig(cardConfig);
-      return pictureEntityCard;
-    }
-
     const fallback = document.createElement("ha-card");
     const img = document.createElement("img");
-    img.src = this._cameraProxyStreamUrl(entityId);
+    img.src = this._cameraProxyStreamUrl(entityId, true);
     img.alt = entityId;
     img.style.width = "100%";
     img.style.display = "block";
     img.style.minHeight = "220px";
     img.style.objectFit = "contain";
     img.style.background = "#000";
+    img.addEventListener("error", () => {
+      if (this._liveReconnectTimer) {
+        clearTimeout(this._liveReconnectTimer);
+      }
+      this._liveReconnectTimer = setTimeout(() => {
+        img.src = this._cameraProxyStreamUrl(entityId, true);
+      }, 1200);
+    });
     fallback.appendChild(img);
     return fallback;
   }
@@ -208,6 +208,7 @@ class EzvizHcnetPanel extends HTMLElement {
       if (status?.playback?.session_id) {
         this._sessionId = status.playback.session_id;
         this._hlsUrl = status.playback.hls_url;
+        this._isPaused = Boolean(status.playback.paused);
       } else {
         this._sessionId = null;
         this._hlsUrl = null;
@@ -220,9 +221,62 @@ class EzvizHcnetPanel extends HTMLElement {
 
     const playbackChanged = prevSessionId !== this._sessionId || prevHlsUrl !== this._hlsUrl;
     const errorChanged = prevError !== this._state.error;
+    this._ensureStatusPolling();
     if (shouldRender || playbackChanged || errorChanged) {
       this._render();
+      return;
     }
+    this._syncPlaybackUi();
+  }
+
+  _ensureStatusPolling() {
+    const shouldPoll = Boolean(this._entryId && this._sessionId);
+    if (shouldPoll && !this._statusTimer) {
+      this._statusTimer = setInterval(() => this._refreshStatus(false), 1000);
+      return;
+    }
+    if (!shouldPoll && this._statusTimer) {
+      clearInterval(this._statusTimer);
+      this._statusTimer = null;
+    }
+  }
+
+  _syncPlaybackUi() {
+    const root = this.shadowRoot;
+    if (!root) return;
+
+    const hasSession = Boolean(this._sessionId);
+    const sessionLabel = root.getElementById("sessionLabel");
+    if (sessionLabel) sessionLabel.textContent = this._sessionId || "-";
+
+    const closeBtn = root.getElementById("closePlaybackBtn");
+    if (closeBtn) closeBtn.disabled = !hasSession;
+
+    const pauseBtn = root.getElementById("pausePlayBtn");
+    if (pauseBtn) {
+      pauseBtn.disabled = !hasSession;
+      pauseBtn.textContent = this._isPaused ? "播放" : "暂停";
+    }
+
+    const seekBtn = root.getElementById("seekBtn");
+    if (seekBtn) seekBtn.disabled = !hasSession;
+
+    const seekRange = root.getElementById("seekRange");
+    if (seekRange) seekRange.disabled = !hasSession;
+
+    const playback = this._state.status?.playback || null;
+    const liveProgress = Number(playback?.progress || 0);
+    const effectiveProgress = this._dragSeekValue !== null ? Number(this._dragSeekValue) : liveProgress;
+
+    if (seekRange && this._dragSeekValue === null) {
+      seekRange.value = String(Math.round(liveProgress));
+    }
+
+    const percentLabel = root.getElementById("seekPercentLabel");
+    if (percentLabel) percentLabel.textContent = `${Math.round(effectiveProgress)}%`;
+
+    const previewLabel = root.getElementById("seekPreviewLabel");
+    if (previewLabel) previewLabel.textContent = `目标时间: ${this._recordingPreviewTime(effectiveProgress)}`;
   }
 
   async _callPtz(direction) {
@@ -334,7 +388,8 @@ class EzvizHcnetPanel extends HTMLElement {
       this._hlsUrl = resp.hls_url;
       this._isPaused = false;
       this._dragSeekValue = null;
-      await this._refreshStatus();
+      await this._refreshStatus(false);
+      this._render();
     } catch (err) {
       this._state.error = String(err);
       this._render();
@@ -353,9 +408,21 @@ class EzvizHcnetPanel extends HTMLElement {
     try {
       const body = { action };
       if (seekPercent !== null) body.seek_percent = Number(seekPercent);
-      await this._api("post", `ezviz_hcnet/${this._entryId}/playback/${this._sessionId}/control`, body);
+      const payload = await this._api("post", `ezviz_hcnet/${this._entryId}/playback/${this._sessionId}/control`, body);
+      if (payload?.session_id) this._sessionId = payload.session_id;
+      if (typeof payload?.paused === "boolean") {
+        this._isPaused = payload.paused;
+      } else if (action === "pause") {
+        this._isPaused = true;
+      } else if (action === "play") {
+        this._isPaused = false;
+      }
+      if (this._state.status?.playback) {
+        this._state.status.playback.progress = Number(payload?.progress || 0);
+      }
       this._state.error = "";
-      await this._refreshStatus();
+      this._syncPlaybackUi();
+      await this._refreshStatus(false);
     } catch (err) {
       this._state.error = String(err);
       this._render();
@@ -365,12 +432,10 @@ class EzvizHcnetPanel extends HTMLElement {
   async _togglePausePlay() {
     if (this._isPaused) {
       await this._control("play");
-      this._isPaused = false;
     } else {
       await this._control("pause");
-      this._isPaused = true;
     }
-    this._render();
+    this._syncPlaybackUi();
   }
 
   async _seekToCurrentDragValue() {
@@ -392,7 +457,9 @@ class EzvizHcnetPanel extends HTMLElement {
     this._isPaused = false;
     this._dragSeekValue = null;
     this._destroyHls();
-    await this._refreshStatus();
+    this._ensureStatusPolling();
+    await this._refreshStatus(false);
+    this._render();
   }
 
   _destroyHls() {
@@ -400,12 +467,17 @@ class EzvizHcnetPanel extends HTMLElement {
       this._hls.destroy();
     }
     this._hls = null;
+    this._boundHlsUrl = null;
   }
 
   _bindPlayer() {
     const video = this.shadowRoot?.getElementById("player");
     if (!video || !this._hlsUrl) {
       this._destroyHls();
+      return;
+    }
+
+    if (this._boundHlsUrl === this._hlsUrl && video.dataset.boundUrl === this._hlsUrl) {
       return;
     }
 
@@ -435,10 +507,14 @@ class EzvizHcnetPanel extends HTMLElement {
       }
       this._hls.loadSource(this._hlsUrl);
       this._hls.attachMedia(video);
+      this._boundHlsUrl = this._hlsUrl;
+      video.dataset.boundUrl = this._hlsUrl;
       return;
     }
 
     video.src = this._hlsUrl;
+    this._boundHlsUrl = this._hlsUrl;
+    video.dataset.boundUrl = this._hlsUrl;
   }
 
   _renderRecordingsList() {
@@ -542,7 +618,7 @@ class EzvizHcnetPanel extends HTMLElement {
         <div class="row" style="margin-top:10px;">
           <button class="primary" id="openSelectedBtn" ${selectedRecording ? "" : "disabled"}>播放选中片段</button>
           <button id="closePlaybackBtn" ${this._sessionId ? "" : "disabled"}>关闭会话</button>
-          <span class="muted">当前会话: ${this._sessionId || "-"}</span>
+          <span class="muted">当前会话: <span id="sessionLabel">${this._sessionId || "-"}</span></span>
         </div>
 
         <div class="playback-wrap" style="margin-top:10px;">
@@ -600,6 +676,8 @@ class EzvizHcnetPanel extends HTMLElement {
 
     this._mountLiveCard();
     this._bindPlayer();
+    this._ensureStatusPolling();
+    this._syncPlaybackUi();
   }
 }
 

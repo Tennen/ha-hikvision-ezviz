@@ -23,7 +23,6 @@ from ..const import (
     DOMAIN,
     NET_DVR_PLAYGETPOS,
     NET_DVR_PLAYPAUSE,
-    NET_DVR_PLAYRESTART,
     NET_DVR_PLAYSETPOS,
     NET_DVR_PLAYSTART,
     PTZ_DIRECTION_TO_CMD,
@@ -287,7 +286,7 @@ class HcNetSdkClient:
     def playback_control(self, handle: int, action: str, seek_percent: float | None = None) -> int:
         with self._lock:
             if action == "play":
-                command = NET_DVR_PLAYRESTART
+                command = NET_DVR_PLAYSTART
                 value = 0
             elif action == "pause":
                 command = NET_DVR_PLAYPAUSE

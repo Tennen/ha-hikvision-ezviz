@@ -234,6 +234,7 @@ def _session_payload(session: PlaybackSession, *, progress: int) -> dict:
         "start": info.start.isoformat(),
         "end": info.end.isoformat(),
         "status": info.status,
+        "paused": info.paused,
         "last_error": info.last_error,
         "created_at": info.created_at.isoformat(),
         "last_access": info.last_access.isoformat(),

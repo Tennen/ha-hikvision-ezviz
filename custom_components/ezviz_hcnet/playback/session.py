@@ -36,6 +36,7 @@ class PlaybackInfo:
     start: datetime
     end: datetime
     status: str
+    paused: bool
     last_error: str | None
     created_at: datetime
     last_access: datetime
@@ -62,6 +63,7 @@ class PlaybackSession:
 
         self.handle: int | None = None
         self.status = "INIT"
+        self.is_paused = False
         self.last_error: str | None = None
         self.created_at = datetime.now(tz=timezone.utc)
         self.last_access = self.created_at
@@ -91,6 +93,7 @@ class PlaybackSession:
                 raise
 
             self.status = "RUNNING"
+            self.is_paused = False
             self._touch()
 
     def _start_ffmpeg(self) -> None:
@@ -129,11 +132,13 @@ class PlaybackSession:
             "-hls_time",
             "2",
             "-hls_list_size",
-            "12",
+            "0",
+            "-hls_playlist_type",
+            "event",
             "-hls_segment_type",
             "mpegts",
             "-hls_flags",
-            "delete_segments+append_list+omit_endlist+independent_segments",
+            "append_list+independent_segments",
             "-hls_segment_filename",
             str(segment_pattern),
             str(self.index_file),
@@ -204,6 +209,10 @@ class PlaybackSession:
             if self.handle is None:
                 raise RuntimeError("Playback session is not open")
             self.client.playback_control(self.handle, action, seek_percent)
+            if action == "pause":
+                self.is_paused = True
+            elif action == "play":
+                self.is_paused = False
             self._touch()
 
     def get_progress(self) -> int:
@@ -277,6 +286,7 @@ class PlaybackSession:
             start=self.start,
             end=self.end,
             status=self.status,
+            paused=self.is_paused,
             last_error=self.last_error,
             created_at=self.created_at,
             last_access=self.last_access,
