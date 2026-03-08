@@ -98,7 +98,7 @@ class EzvizHcnetRecordingsView(_BaseEzvizView):
         if not day:
             raise web.HTTPBadRequest(text="date query is required (YYYY-MM-DD)")
 
-        slot_minutes_raw = (request.query.get("slot_minutes") or "15").strip()
+        slot_minutes_raw = (request.query.get("slot_minutes") or "60").strip()
         try:
             slot_minutes = int(slot_minutes_raw)
         except ValueError as err:

@@ -16,7 +16,12 @@ from pathlib import Path
 
 from homeassistant.core import HomeAssistant
 
-from ..const import PLAYBACK_SESSION_IDLE_TIMEOUT
+from ..const import (
+    NET_DVR_AUDIOSTREAMDATA,
+    NET_DVR_STREAMDATA,
+    NET_DVR_SYSHEAD,
+    PLAYBACK_SESSION_IDLE_TIMEOUT,
+)
 from ..sdk.client import HcNetSdkClient, SdkCallError
 from ..sdk.ctypes_defs import PLAY_DATA_CALLBACK
 
@@ -62,7 +67,7 @@ class PlaybackSession:
         self.last_access = self.created_at
 
         self._callback: PLAY_DATA_CALLBACK | None = None
-        self._queue: queue.Queue[bytes | None] = queue.Queue(maxsize=512)
+        self._queue: queue.Queue[bytes | None] = queue.Queue(maxsize=4096)
         self._writer_thread: threading.Thread | None = None
         self._ffmpeg: subprocess.Popen[bytes] | None = None
         self._lock = threading.RLock()
@@ -90,23 +95,47 @@ class PlaybackSession:
 
     def _start_ffmpeg(self) -> None:
         assert self.index_file is not None
+        segment_pattern = self.base_dir / "segment_%05d.ts"
         cmd = [
             "ffmpeg",
             "-hide_banner",
             "-loglevel",
-            "error",
+            "warning",
+            "-fflags",
+            "+genpts+discardcorrupt",
+            "-analyzeduration",
+            "2M",
+            "-probesize",
+            "2M",
             "-i",
             "pipe:0",
-            "-c",
-            "copy",
+            "-an",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-tune",
+            "zerolatency",
+            "-pix_fmt",
+            "yuv420p",
+            "-g",
+            "50",
+            "-keyint_min",
+            "50",
+            "-sc_threshold",
+            "0",
             "-f",
             "hls",
             "-hls_time",
             "2",
             "-hls_list_size",
-            "8",
+            "12",
+            "-hls_segment_type",
+            "mpegts",
             "-hls_flags",
-            "delete_segments+append_list+omit_endlist",
+            "delete_segments+append_list+omit_endlist+independent_segments",
+            "-hls_segment_filename",
+            str(segment_pattern),
             str(self.index_file),
         ]
         self._ffmpeg = subprocess.Popen(
@@ -128,7 +157,6 @@ class PlaybackSession:
                         break
                     try:
                         proc.stdin.write(chunk)
-                        proc.stdin.flush()
                     except BrokenPipeError:
                         self.last_error = "ffmpeg pipe broken"
                         break
@@ -145,6 +173,7 @@ class PlaybackSession:
 
     def _attach_callback(self) -> None:
         assert self.handle is not None
+        allowed_types = {NET_DVR_SYSHEAD, NET_DVR_STREAMDATA, NET_DVR_AUDIOSTREAMDATA}
 
         def _on_data(
             _play_handle: int,
@@ -154,6 +183,8 @@ class PlaybackSession:
             _user: int,
         ) -> None:
             if not p_buffer or buf_size <= 0:
+                return
+            if int(_data_type) not in allowed_types:
                 return
             try:
                 data = C.string_at(p_buffer, buf_size)

@@ -5,10 +5,10 @@ class EzvizHcnetPanel extends HTMLElement {
     this._sessionId = null;
     this._hlsUrl = null;
     this._hls = null;
-    this._statusTimer = null;
     this._liveCard = null;
     this._liveCardEntityId = null;
     this._liveCardBuildTask = null;
+    this._initialized = false;
     this._dragSeekValue = null;
     this._isPaused = false;
     this._state = {
@@ -23,16 +23,26 @@ class EzvizHcnetPanel extends HTMLElement {
   }
 
   set hass(hass) {
+    const firstUpdate = !this._initialized;
     this._hass = hass;
 
     if (!this._state.recordingsDate) {
       this._state.recordingsDate = this._todayDateString();
     }
 
-    this._render();
-    if (!this._statusTimer) {
-      this._refreshStatus();
-      this._statusTimer = setInterval(() => this._refreshStatus(), 3000);
+    if (firstUpdate) {
+      this._initialized = true;
+      this._render();
+      this._refreshStatus(false);
+      return;
+    }
+
+    if (this._liveCard) {
+      this._liveCard.hass = hass;
+    }
+
+    if (!this._liveCard && this._cameraEntityId()) {
+      this._render();
     }
   }
 
@@ -50,16 +60,12 @@ class EzvizHcnetPanel extends HTMLElement {
       this._liveCard = null;
       this._liveCardEntityId = null;
       this._liveCardBuildTask = null;
-      this._refreshStatus();
+      this._refreshStatus(false);
     }
     this._render();
   }
 
   disconnectedCallback() {
-    if (this._statusTimer) {
-      clearInterval(this._statusTimer);
-      this._statusTimer = null;
-    }
     this._destroyHls();
     this._liveCard = null;
     this._liveCardEntityId = null;
@@ -191,8 +197,11 @@ class EzvizHcnetPanel extends HTMLElement {
     })();
   }
 
-  async _refreshStatus() {
+  async _refreshStatus(shouldRender = true) {
     if (!this._entryId || !this._hass) return;
+    const prevSessionId = this._sessionId;
+    const prevHlsUrl = this._hlsUrl;
+    const prevError = this._state.error;
     try {
       const status = await this._api("get", `ezviz_hcnet/${this._entryId}/status`);
       this._state.status = status;
@@ -208,7 +217,12 @@ class EzvizHcnetPanel extends HTMLElement {
     } catch (err) {
       this._state.error = String(err);
     }
-    this._render();
+
+    const playbackChanged = prevSessionId !== this._sessionId || prevHlsUrl !== this._hlsUrl;
+    const errorChanged = prevError !== this._state.error;
+    if (shouldRender || playbackChanged || errorChanged) {
+      this._render();
+    }
   }
 
   async _callPtz(direction) {
@@ -538,9 +552,9 @@ class EzvizHcnetPanel extends HTMLElement {
         <div class="row" style="margin-top:10px;">
           <button id="pausePlayBtn" ${this._sessionId ? "" : "disabled"}>${this._isPaused ? "播放" : "暂停"}</button>
           <input class="slider" id="seekRange" type="range" min="0" max="100" step="1" value="${playbackPercent}" ${this._sessionId ? "" : "disabled"} />
-          <span>${Math.round(playbackPercent)}%</span>
+          <span id="seekPercentLabel">${Math.round(playbackPercent)}%</span>
           <button id="seekBtn" ${this._sessionId ? "" : "disabled"}>拖动后定位</button>
-          <span class="muted">目标时间: ${previewTime}</span>
+          <span class="muted" id="seekPreviewLabel">目标时间: ${previewTime}</span>
         </div>
 
         ${this._state.error ? `<div class="error">${this._state.error}</div>` : ""}
@@ -574,8 +588,12 @@ class EzvizHcnetPanel extends HTMLElement {
 
     this.shadowRoot.getElementById("pausePlayBtn")?.addEventListener("click", () => this._togglePausePlay());
     this.shadowRoot.getElementById("seekRange")?.addEventListener("input", (ev) => {
-      this._dragSeekValue = Number(ev.target.value);
-      this._render();
+      const v = Number(ev.target.value);
+      this._dragSeekValue = v;
+      const percentLabel = this.shadowRoot?.getElementById("seekPercentLabel");
+      if (percentLabel) percentLabel.textContent = `${Math.round(v)}%`;
+      const previewLabel = this.shadowRoot?.getElementById("seekPreviewLabel");
+      if (previewLabel) previewLabel.textContent = `目标时间: ${this._recordingPreviewTime(v)}`;
     });
     this.shadowRoot.getElementById("seekRange")?.addEventListener("change", () => this._seekToCurrentDragValue());
     this.shadowRoot.getElementById("seekBtn")?.addEventListener("click", () => this._seekToCurrentDragValue());
