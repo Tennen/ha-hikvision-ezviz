@@ -36,7 +36,7 @@ class EzvizHcnetCamera(Camera):
     _attr_supported_features = CameraEntityFeature.STREAM
     _attr_use_stream_for_stills = True
     if StreamType is not None:  # pragma: no cover - depends on HA version
-        _attr_frontend_stream_type = StreamType.HLS
+        _attr_frontend_stream_type = getattr(StreamType, "WEB_RTC", StreamType.HLS)
 
     def __init__(self, entry: ConfigEntry, client) -> None:
         super().__init__()

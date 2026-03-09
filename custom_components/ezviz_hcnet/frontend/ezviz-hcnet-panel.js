@@ -110,24 +110,6 @@ class EzvizHcnetPanel extends HTMLElement {
     return null;
   }
 
-  _cameraProxyStreamUrl(entityId, cacheBust = false) {
-    const state = this._hass?.states?.[entityId];
-    const attrs = state?.attributes || {};
-    const directToken = typeof attrs.access_token === "string" ? attrs.access_token : "";
-    const listToken = Array.isArray(attrs.access_tokens) ? String(attrs.access_tokens[0] || "") : "";
-    const token = directToken || listToken;
-
-    const base = `/api/camera_proxy_stream/${entityId}`;
-    const params = [];
-    if (token) {
-      params.push(`token=${encodeURIComponent(token)}`);
-    }
-    if (cacheBust) {
-      params.push(`_t=${Date.now()}`);
-    }
-    return params.length ? `${base}?${params.join("&")}` : base;
-  }
-
   async _withTimeout(promise, ms, label) {
     let timer = null;
     try {
@@ -168,27 +150,10 @@ class EzvizHcnetPanel extends HTMLElement {
         pictureEntityCard.setConfig(cardConfig);
         return pictureEntityCard;
       }
-    } catch (_err) {
-      // Fallback below.
+    } catch (err) {
+      throw new Error(`loadCardHelpers failed: ${String(err)}`);
     }
-
-    // Fallback: direct proxy stream, avoids hanging forever on unresolved live card helpers.
-    const fallback = document.createElement("ha-card");
-    const img = document.createElement("img");
-    img.src = this._cameraProxyStreamUrl(entityId, true);
-    img.alt = entityId;
-    img.style.width = "100%";
-    img.style.display = "block";
-    img.style.minHeight = "220px";
-    img.style.objectFit = "contain";
-    img.style.background = "#000";
-    img.addEventListener("error", () => {
-      setTimeout(() => {
-        img.src = this._cameraProxyStreamUrl(entityId, true);
-      }, 1200);
-    });
-    fallback.appendChild(img);
-    return fallback;
+    throw new Error("Unable to build live card: neither card helpers nor hui-picture-entity-card available");
   }
 
   _mountLiveCard() {
