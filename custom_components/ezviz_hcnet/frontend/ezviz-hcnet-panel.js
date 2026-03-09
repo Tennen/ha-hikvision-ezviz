@@ -7,9 +7,6 @@ class EzvizHcnetPanel extends HTMLElement {
     this._hls = null;
     this._boundHlsUrl = null;
     this._statusTimer = null;
-    this._liveReconnectTimer = null;
-    this._liveFirstFrameTimer = null;
-    this._livePeriodicReloadTimer = null;
     this._liveCard = null;
     this._liveCardEntityId = null;
     this._liveCardBuildTask = null;
@@ -68,7 +65,6 @@ class EzvizHcnetPanel extends HTMLElement {
       this._liveCard = null;
       this._liveCardEntityId = null;
       this._liveCardBuildTask = null;
-      this._clearLiveTimers();
       this._refreshStatus(false);
     }
     this._render();
@@ -79,11 +75,6 @@ class EzvizHcnetPanel extends HTMLElement {
       clearInterval(this._statusTimer);
       this._statusTimer = null;
     }
-    if (this._liveReconnectTimer) {
-      clearTimeout(this._liveReconnectTimer);
-      this._liveReconnectTimer = null;
-    }
-    this._clearLiveTimers();
     this._destroyHls();
     this._liveCard = null;
     this._liveCardEntityId = null;
@@ -119,35 +110,6 @@ class EzvizHcnetPanel extends HTMLElement {
     return null;
   }
 
-  _cameraProxyStreamUrl(entityId, cacheBust = false) {
-    const state = this._hass?.states?.[entityId];
-    const attrs = state?.attributes || {};
-    const directToken = typeof attrs.access_token === "string" ? attrs.access_token : "";
-    const listToken = Array.isArray(attrs.access_tokens) ? String(attrs.access_tokens[0] || "") : "";
-    const token = directToken || listToken;
-
-    const base = `/api/camera_proxy_stream/${entityId}`;
-    const params = [];
-    if (token) {
-      params.push(`token=${encodeURIComponent(token)}`);
-    }
-    if (cacheBust) {
-      params.push(`_t=${Date.now()}`);
-    }
-    return params.length ? `${base}?${params.join("&")}` : base;
-  }
-
-  _clearLiveTimers() {
-    if (this._liveFirstFrameTimer) {
-      clearTimeout(this._liveFirstFrameTimer);
-      this._liveFirstFrameTimer = null;
-    }
-    if (this._livePeriodicReloadTimer) {
-      clearInterval(this._livePeriodicReloadTimer);
-      this._livePeriodicReloadTimer = null;
-    }
-  }
-
   async _buildLiveCard(entityId) {
     const cardConfig = {
       type: "picture-entity",
@@ -162,48 +124,13 @@ class EzvizHcnetPanel extends HTMLElement {
       return helpers.createCardElement(cardConfig);
     }
 
+    await customElements.whenDefined("hui-picture-entity-card");
     const pictureEntityCard = document.createElement("hui-picture-entity-card");
-    if (typeof pictureEntityCard.setConfig === "function") {
-      pictureEntityCard.setConfig(cardConfig);
-      return pictureEntityCard;
+    if (typeof pictureEntityCard.setConfig !== "function") {
+      throw new Error("hui-picture-entity-card is unavailable in current frontend");
     }
-
-    const fallback = document.createElement("ha-card");
-    const img = document.createElement("img");
-    const resetSrc = () => {
-      img.src = this._cameraProxyStreamUrl(entityId, true);
-    };
-
-    resetSrc();
-    img.alt = entityId;
-    img.style.width = "100%";
-    img.style.display = "block";
-    img.style.minHeight = "220px";
-    img.style.objectFit = "contain";
-    img.style.background = "#000";
-    this._clearLiveTimers();
-    this._liveFirstFrameTimer = setTimeout(() => {
-      resetSrc();
-    }, 4000);
-    this._livePeriodicReloadTimer = setInterval(() => {
-      resetSrc();
-    }, 30000);
-    img.addEventListener("load", () => {
-      if (this._liveFirstFrameTimer) {
-        clearTimeout(this._liveFirstFrameTimer);
-        this._liveFirstFrameTimer = null;
-      }
-    });
-    img.addEventListener("error", () => {
-      if (this._liveReconnectTimer) {
-        clearTimeout(this._liveReconnectTimer);
-      }
-      this._liveReconnectTimer = setTimeout(() => {
-        resetSrc();
-      }, 1200);
-    });
-    fallback.appendChild(img);
-    return fallback;
+    pictureEntityCard.setConfig(cardConfig);
+    return pictureEntityCard;
   }
 
   _mountLiveCard() {
@@ -212,7 +139,6 @@ class EzvizHcnetPanel extends HTMLElement {
 
     const entityId = this._cameraEntityId();
     if (!entityId || !this._hass) {
-      this._clearLiveTimers();
       this._liveCard = null;
       this._liveCardEntityId = null;
       this._liveCardBuildTask = null;
@@ -233,7 +159,6 @@ class EzvizHcnetPanel extends HTMLElement {
 
     this._liveCard = null;
     this._liveCardEntityId = entityId;
-    this._clearLiveTimers();
     container.innerHTML = '<div style="padding:14px;" class="muted">正在加载实时视频...</div>';
 
     this._liveCardBuildTask = (async () => {
