@@ -110,6 +110,38 @@ class EzvizHcnetPanel extends HTMLElement {
     return null;
   }
 
+  _cameraProxyStreamUrl(entityId, cacheBust = false) {
+    const state = this._hass?.states?.[entityId];
+    const attrs = state?.attributes || {};
+    const directToken = typeof attrs.access_token === "string" ? attrs.access_token : "";
+    const listToken = Array.isArray(attrs.access_tokens) ? String(attrs.access_tokens[0] || "") : "";
+    const token = directToken || listToken;
+
+    const base = `/api/camera_proxy_stream/${entityId}`;
+    const params = [];
+    if (token) {
+      params.push(`token=${encodeURIComponent(token)}`);
+    }
+    if (cacheBust) {
+      params.push(`_t=${Date.now()}`);
+    }
+    return params.length ? `${base}?${params.join("&")}` : base;
+  }
+
+  async _withTimeout(promise, ms, label) {
+    let timer = null;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`${label} timeout`)), ms);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   async _buildLiveCard(entityId) {
     const cardConfig = {
       type: "picture-entity",
@@ -119,18 +151,44 @@ class EzvizHcnetPanel extends HTMLElement {
       show_state: false,
     };
 
-    if (typeof window.loadCardHelpers === "function") {
-      const helpers = await window.loadCardHelpers();
-      return helpers.createCardElement(cardConfig);
+    try {
+      if (typeof window.loadCardHelpers === "function") {
+        const helpers = await this._withTimeout(window.loadCardHelpers(), 5000, "loadCardHelpers");
+        const card = helpers.createCardElement(cardConfig);
+        if (card) {
+          return card;
+        }
+      }
+
+      if (customElements.get("hui-picture-entity-card")) {
+        const pictureEntityCard = document.createElement("hui-picture-entity-card");
+        if (typeof pictureEntityCard.setConfig !== "function") {
+          throw new Error("hui-picture-entity-card has no setConfig");
+        }
+        pictureEntityCard.setConfig(cardConfig);
+        return pictureEntityCard;
+      }
+    } catch (_err) {
+      // Fallback below.
     }
 
-    await customElements.whenDefined("hui-picture-entity-card");
-    const pictureEntityCard = document.createElement("hui-picture-entity-card");
-    if (typeof pictureEntityCard.setConfig !== "function") {
-      throw new Error("hui-picture-entity-card is unavailable in current frontend");
-    }
-    pictureEntityCard.setConfig(cardConfig);
-    return pictureEntityCard;
+    // Fallback: direct proxy stream, avoids hanging forever on unresolved live card helpers.
+    const fallback = document.createElement("ha-card");
+    const img = document.createElement("img");
+    img.src = this._cameraProxyStreamUrl(entityId, true);
+    img.alt = entityId;
+    img.style.width = "100%";
+    img.style.display = "block";
+    img.style.minHeight = "220px";
+    img.style.objectFit = "contain";
+    img.style.background = "#000";
+    img.addEventListener("error", () => {
+      setTimeout(() => {
+        img.src = this._cameraProxyStreamUrl(entityId, true);
+      }, 1200);
+    });
+    fallback.appendChild(img);
+    return fallback;
   }
 
   _mountLiveCard() {
