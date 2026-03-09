@@ -115,9 +115,21 @@ class EzvizHcnetPanel extends HTMLElement {
   }
 
   _cameraProxyStreamUrl(entityId, cacheBust = false) {
+    const state = this._hass?.states?.[entityId];
+    const attrs = state?.attributes || {};
+    const directToken = typeof attrs.access_token === "string" ? attrs.access_token : "";
+    const listToken = Array.isArray(attrs.access_tokens) ? String(attrs.access_tokens[0] || "") : "";
+    const token = directToken || listToken;
+
     const base = `/api/camera_proxy_stream/${entityId}`;
-    if (!cacheBust) return base;
-    return `${base}?_t=${Date.now()}`;
+    const params = [];
+    if (token) {
+      params.push(`token=${encodeURIComponent(token)}`);
+    }
+    if (cacheBust) {
+      params.push(`_t=${Date.now()}`);
+    }
+    return params.length ? `${base}?${params.join("&")}` : base;
   }
 
   async _buildLiveCard(entityId) {
