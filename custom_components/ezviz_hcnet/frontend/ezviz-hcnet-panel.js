@@ -8,12 +8,15 @@ class EzvizHcnetPanel extends HTMLElement {
     this._boundHlsUrl = null;
     this._statusTimer = null;
     this._liveReconnectTimer = null;
+    this._liveFirstFrameTimer = null;
+    this._livePeriodicReloadTimer = null;
     this._liveCard = null;
     this._liveCardEntityId = null;
     this._liveCardBuildTask = null;
     this._initialized = false;
     this._dragSeekValue = null;
     this._isPaused = false;
+    this._endedSessionId = null;
     this._state = {
       loading: false,
       error: "",
@@ -65,6 +68,7 @@ class EzvizHcnetPanel extends HTMLElement {
       this._liveCard = null;
       this._liveCardEntityId = null;
       this._liveCardBuildTask = null;
+      this._clearLiveTimers();
       this._refreshStatus(false);
     }
     this._render();
@@ -79,6 +83,7 @@ class EzvizHcnetPanel extends HTMLElement {
       clearTimeout(this._liveReconnectTimer);
       this._liveReconnectTimer = null;
     }
+    this._clearLiveTimers();
     this._destroyHls();
     this._liveCard = null;
     this._liveCardEntityId = null;
@@ -132,22 +137,69 @@ class EzvizHcnetPanel extends HTMLElement {
     return params.length ? `${base}?${params.join("&")}` : base;
   }
 
+  _clearLiveTimers() {
+    if (this._liveFirstFrameTimer) {
+      clearTimeout(this._liveFirstFrameTimer);
+      this._liveFirstFrameTimer = null;
+    }
+    if (this._livePeriodicReloadTimer) {
+      clearInterval(this._livePeriodicReloadTimer);
+      this._livePeriodicReloadTimer = null;
+    }
+  }
+
   async _buildLiveCard(entityId) {
+    const cardConfig = {
+      type: "picture-entity",
+      entity: entityId,
+      camera_view: "live",
+      show_name: false,
+      show_state: false,
+    };
+
+    if (typeof window.loadCardHelpers === "function") {
+      const helpers = await window.loadCardHelpers();
+      return helpers.createCardElement(cardConfig);
+    }
+
+    const pictureEntityCard = document.createElement("hui-picture-entity-card");
+    if (typeof pictureEntityCard.setConfig === "function") {
+      pictureEntityCard.setConfig(cardConfig);
+      return pictureEntityCard;
+    }
+
     const fallback = document.createElement("ha-card");
     const img = document.createElement("img");
-    img.src = this._cameraProxyStreamUrl(entityId, true);
+    const resetSrc = () => {
+      img.src = this._cameraProxyStreamUrl(entityId, true);
+    };
+
+    resetSrc();
     img.alt = entityId;
     img.style.width = "100%";
     img.style.display = "block";
     img.style.minHeight = "220px";
     img.style.objectFit = "contain";
     img.style.background = "#000";
+    this._clearLiveTimers();
+    this._liveFirstFrameTimer = setTimeout(() => {
+      resetSrc();
+    }, 4000);
+    this._livePeriodicReloadTimer = setInterval(() => {
+      resetSrc();
+    }, 30000);
+    img.addEventListener("load", () => {
+      if (this._liveFirstFrameTimer) {
+        clearTimeout(this._liveFirstFrameTimer);
+        this._liveFirstFrameTimer = null;
+      }
+    });
     img.addEventListener("error", () => {
       if (this._liveReconnectTimer) {
         clearTimeout(this._liveReconnectTimer);
       }
       this._liveReconnectTimer = setTimeout(() => {
-        img.src = this._cameraProxyStreamUrl(entityId, true);
+        resetSrc();
       }, 1200);
     });
     fallback.appendChild(img);
@@ -160,6 +212,7 @@ class EzvizHcnetPanel extends HTMLElement {
 
     const entityId = this._cameraEntityId();
     if (!entityId || !this._hass) {
+      this._clearLiveTimers();
       this._liveCard = null;
       this._liveCardEntityId = null;
       this._liveCardBuildTask = null;
@@ -180,6 +233,7 @@ class EzvizHcnetPanel extends HTMLElement {
 
     this._liveCard = null;
     this._liveCardEntityId = entityId;
+    this._clearLiveTimers();
     container.innerHTML = '<div style="padding:14px;" class="muted">正在加载实时视频...</div>';
 
     this._liveCardBuildTask = (async () => {
@@ -221,10 +275,17 @@ class EzvizHcnetPanel extends HTMLElement {
         this._sessionId = status.playback.session_id;
         this._hlsUrl = status.playback.hls_url;
         this._isPaused = Boolean(status.playback.paused);
+        const progress = Number(status.playback.progress || 0);
+        if (progress >= 100 && this._endedSessionId !== this._sessionId) {
+          this._endedSessionId = this._sessionId;
+          await this._closePlayback(true);
+          return;
+        }
       } else {
         this._sessionId = null;
         this._hlsUrl = null;
         this._isPaused = false;
+        this._endedSessionId = null;
       }
       this._state.error = "";
     } catch (err) {
@@ -397,6 +458,7 @@ class EzvizHcnetPanel extends HTMLElement {
         end: rec.end,
       });
       this._sessionId = resp.session_id;
+      this._endedSessionId = null;
       this._hlsUrl = resp.hls_url;
       this._isPaused = false;
       this._dragSeekValue = null;
@@ -457,7 +519,7 @@ class EzvizHcnetPanel extends HTMLElement {
     await this._control("seek", v);
   }
 
-  async _closePlayback() {
+  async _closePlayback(skipRefresh = false) {
     if (!this._sessionId) return;
     try {
       await this._api("delete", `ezviz_hcnet/${this._entryId}/playback/${this._sessionId}`);
@@ -470,7 +532,9 @@ class EzvizHcnetPanel extends HTMLElement {
     this._dragSeekValue = null;
     this._destroyHls();
     this._ensureStatusPolling();
-    await this._refreshStatus(false);
+    if (!skipRefresh) {
+      await this._refreshStatus(false);
+    }
     this._render();
   }
 
