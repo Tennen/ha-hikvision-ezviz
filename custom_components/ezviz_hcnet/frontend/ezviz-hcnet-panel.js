@@ -300,6 +300,16 @@ class EzvizHcnetPanel extends HTMLElement {
     if (previewLabel) previewLabel.textContent = `目标时间: ${this._recordingPreviewTime(effectiveProgress)}`;
   }
 
+  _syncErrorUi() {
+    const root = this.shadowRoot;
+    if (!root) return;
+    const errorEl = root.getElementById("errorText");
+    if (!errorEl) return;
+    const msg = String(this._state.error || "");
+    errorEl.textContent = msg;
+    errorEl.style.display = msg ? "" : "none";
+  }
+
   async _callPtz(direction) {
     if (!this._hass || !this._entryId) return;
     try {
@@ -311,8 +321,10 @@ class EzvizHcnetPanel extends HTMLElement {
       this._state.error = "";
     } catch (err) {
       this._state.error = String(err);
+      this._syncErrorUi();
+      return;
     }
-    this._render();
+    this._syncErrorUi();
   }
 
   _readInput(id) {
@@ -657,7 +669,7 @@ class EzvizHcnetPanel extends HTMLElement {
           <span class="muted" id="seekPreviewLabel">目标时间: ${previewTime}</span>
         </div>
 
-        ${this._state.error ? `<div class="error">${this._state.error}</div>` : ""}
+        <div id="errorText" class="error" style="${this._state.error ? "" : "display:none;"}">${this._state.error || ""}</div>
       </div>
     `;
 
@@ -702,6 +714,7 @@ class EzvizHcnetPanel extends HTMLElement {
     this._bindPlayer();
     this._ensureStatusPolling();
     this._syncPlaybackUi();
+    this._syncErrorUi();
   }
 }
 
