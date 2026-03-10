@@ -10,6 +10,8 @@ class EzvizHcnetPanel extends HTMLElement {
     this._liveCard = null;
     this._liveCardEntityId = null;
     this._liveCardBuildTask = null;
+    this._liveCardRetryTimer = null;
+    this._liveCardRetryCount = 0;
     this._initialized = false;
     this._dragSeekValue = null;
     this._isPaused = false;
@@ -41,7 +43,7 @@ class EzvizHcnetPanel extends HTMLElement {
     }
 
     if (this._liveCard) {
-      this._liveCard.hass = hass;
+      this._updateLiveCardData();
     }
 
     if (!this._liveCard && this._cameraEntityId()) {
@@ -65,6 +67,11 @@ class EzvizHcnetPanel extends HTMLElement {
       this._liveCard = null;
       this._liveCardEntityId = null;
       this._liveCardBuildTask = null;
+      if (this._liveCardRetryTimer) {
+        clearTimeout(this._liveCardRetryTimer);
+        this._liveCardRetryTimer = null;
+      }
+      this._liveCardRetryCount = 0;
       this._refreshStatus(false);
     }
     this._render();
@@ -79,6 +86,11 @@ class EzvizHcnetPanel extends HTMLElement {
     this._liveCard = null;
     this._liveCardEntityId = null;
     this._liveCardBuildTask = null;
+    if (this._liveCardRetryTimer) {
+      clearTimeout(this._liveCardRetryTimer);
+      this._liveCardRetryTimer = null;
+    }
+    this._liveCardRetryCount = 0;
   }
 
   get _entryId() {
@@ -124,7 +136,32 @@ class EzvizHcnetPanel extends HTMLElement {
     }
   }
 
+  _updateLiveCardData() {
+    if (!this._liveCard || !this._hass) return;
+    this._liveCard.hass = this._hass;
+    const streamEl = this._liveCard.querySelector?.("ha-camera-stream");
+    if (!streamEl) return;
+    streamEl.hass = this._hass;
+    const entityId = this._liveCardEntityId;
+    if (entityId) {
+      streamEl.stateObj = this._hass.states?.[entityId] || null;
+    }
+    streamEl.cameraView = "live";
+  }
+
+  _scheduleLiveCardRetry(entityId) {
+    if (this._liveCardRetryTimer || this._liveCardEntityId !== entityId) return;
+    const delayMs = Math.min(6000, 1000 + this._liveCardRetryCount * 1000);
+    this._liveCardRetryTimer = setTimeout(() => {
+      this._liveCardRetryTimer = null;
+      if (this._liveCardEntityId !== entityId || this._liveCard) return;
+      this._mountLiveCard();
+    }, delayMs);
+  }
+
   async _buildLiveCard(entityId) {
+    const stateObj = this._hass?.states?.[entityId] || null;
+    let helperErr = "";
     const cardConfig = {
       type: "picture-entity",
       entity: entityId,
@@ -133,27 +170,66 @@ class EzvizHcnetPanel extends HTMLElement {
       show_state: false,
     };
 
-    try {
-      if (typeof window.loadCardHelpers === "function") {
-        const helpers = await this._withTimeout(window.loadCardHelpers(), 5000, "loadCardHelpers");
+    const loadHelpersFn =
+      (typeof window.loadCardHelpers === "function" && window.loadCardHelpers.bind(window)) ||
+      (typeof this._hass?.loadCardHelpers === "function" && this._hass.loadCardHelpers.bind(this._hass)) ||
+      null;
+
+    if (loadHelpersFn) {
+      try {
+        const helpers = await this._withTimeout(loadHelpersFn(), 5000, "loadCardHelpers");
         const card = helpers.createCardElement(cardConfig);
         if (card) {
           return card;
         }
+      } catch (err) {
+        helperErr = String(err);
       }
-
-      if (customElements.get("hui-picture-entity-card")) {
-        const pictureEntityCard = document.createElement("hui-picture-entity-card");
-        if (typeof pictureEntityCard.setConfig !== "function") {
-          throw new Error("hui-picture-entity-card has no setConfig");
-        }
-        pictureEntityCard.setConfig(cardConfig);
-        return pictureEntityCard;
-      }
-    } catch (err) {
-      throw new Error(`loadCardHelpers failed: ${String(err)}`);
     }
-    throw new Error("Unable to build live card: neither card helpers nor hui-picture-entity-card available");
+
+    if (!customElements.get("hui-picture-entity-card") && typeof window.loadLovelaceElement === "function") {
+      try {
+        await this._withTimeout(
+          window.loadLovelaceElement("hui-picture-entity-card"),
+          5000,
+          "loadLovelaceElement(hui-picture-entity-card)"
+        );
+      } catch (err) {
+        helperErr = helperErr ? `${helperErr}; ${String(err)}` : String(err);
+      }
+    }
+
+    if (customElements.get("hui-picture-entity-card")) {
+      const pictureEntityCard = document.createElement("hui-picture-entity-card");
+      if (typeof pictureEntityCard.setConfig !== "function") {
+        throw new Error("hui-picture-entity-card has no setConfig");
+      }
+      pictureEntityCard.setConfig(cardConfig);
+      return pictureEntityCard;
+    }
+
+    if (customElements.get("ha-camera-stream") && stateObj) {
+      const wrapper = document.createElement("ha-card");
+      const streamEl = document.createElement("ha-camera-stream");
+      streamEl.style.display = "block";
+      streamEl.style.width = "100%";
+      streamEl.style.minHeight = "220px";
+      streamEl.style.background = "#000";
+      streamEl.hass = this._hass;
+      streamEl.stateObj = stateObj;
+      streamEl.cameraView = "live";
+      wrapper.appendChild(streamEl);
+      return wrapper;
+    }
+
+    const detail = helperErr ? ` (${helperErr})` : "";
+    const caps =
+      `window.loadCardHelpers=${typeof window.loadCardHelpers === "function"}, ` +
+      `hass.loadCardHelpers=${typeof this._hass?.loadCardHelpers === "function"}, ` +
+      `loadLovelaceElement=${typeof window.loadLovelaceElement === "function"}, ` +
+      `hui=${Boolean(customElements.get("hui-picture-entity-card"))}, ` +
+      `ha-camera-stream=${Boolean(customElements.get("ha-camera-stream"))}`;
+    throw new Error(`Unable to build live card: card helpers/hui-picture-entity-card/ha-camera-stream not ready${detail}; ${caps}`);
   }
 
   _mountLiveCard() {
@@ -165,6 +241,11 @@ class EzvizHcnetPanel extends HTMLElement {
       this._liveCard = null;
       this._liveCardEntityId = null;
       this._liveCardBuildTask = null;
+      if (this._liveCardRetryTimer) {
+        clearTimeout(this._liveCardRetryTimer);
+        this._liveCardRetryTimer = null;
+      }
+      this._liveCardRetryCount = 0;
       container.innerHTML = '<div style="padding:14px;" class="muted">未找到对应 camera 实体，无法显示实时画面</div>';
       return;
     }
@@ -172,7 +253,7 @@ class EzvizHcnetPanel extends HTMLElement {
     if (this._liveCard && this._liveCardEntityId === entityId) {
       container.innerHTML = "";
       container.appendChild(this._liveCard);
-      this._liveCard.hass = this._hass;
+      this._updateLiveCardData();
       return;
     }
 
@@ -182,6 +263,10 @@ class EzvizHcnetPanel extends HTMLElement {
 
     this._liveCard = null;
     this._liveCardEntityId = entityId;
+    if (this._liveCardRetryTimer) {
+      clearTimeout(this._liveCardRetryTimer);
+      this._liveCardRetryTimer = null;
+    }
     container.innerHTML = '<div style="padding:14px;" class="muted">正在加载实时视频...</div>';
 
     this._liveCardBuildTask = (async () => {
@@ -191,18 +276,22 @@ class EzvizHcnetPanel extends HTMLElement {
           return;
         }
         this._liveCard = card;
+        this._liveCardRetryCount = 0;
         const latestContainer = this.shadowRoot?.getElementById("liveCardContainer");
         if (!latestContainer) return;
         latestContainer.innerHTML = "";
         latestContainer.appendChild(card);
-        card.hass = this._hass;
+        this._updateLiveCardData();
       } catch (err) {
         if (this._liveCardEntityId !== entityId) return;
         this._liveCard = null;
+        this._liveCardRetryCount += 1;
         const latestContainer = this.shadowRoot?.getElementById("liveCardContainer");
         if (latestContainer) {
-          latestContainer.innerHTML = `<div style="padding:14px;" class="error">加载实时卡片失败: ${String(err)}</div>`;
+          const delay = Math.min(6, 1 + this._liveCardRetryCount);
+          latestContainer.innerHTML = `<div style="padding:14px;" class="error">加载实时卡片失败: ${String(err)}。${delay} 秒后自动重试...</div>`;
         }
+        this._scheduleLiveCardRetry(entityId);
       } finally {
         if (this._liveCardEntityId === entityId) {
           this._liveCardBuildTask = null;
